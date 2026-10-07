@@ -46,7 +46,8 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8") or "{}")
 
     def do_GET(self):
-        parsed = urlparse(self.path)\n        path = parsed.path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/status":
             return self.send_json({
                 "version": __version__,
@@ -57,10 +58,12 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/scan":
             snapshot = collect_all()
-            profile = parse_qs(parsed.query).get("profile", ["GENERAL"])[0]\n            recommendations = build_recommendations(snapshot, profile)
+            profile = parse_qs(parsed.query).get("profile", ["GENERAL"])[0]
+            recommendations = build_recommendations(snapshot, profile)
             return self.send_json({
                 "snapshot": [item.to_dict() for item in snapshot],
-                "profile": profile.upper(),\n                "recommendations": [item.to_dict() for item in recommendations],
+                "profile": profile.upper(),
+                "recommendations": [item.to_dict() for item in recommendations],
             })
         if path == "/api/observer/sample":
             return self.send_json(collect_sample().to_dict())
