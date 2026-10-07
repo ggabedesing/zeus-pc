@@ -237,8 +237,96 @@ def update_probe() -> ProbeResult:
         return ProbeResult("Windows Update", Status.PARTIAL, message=str(exc), source="Windows Update Agent")
 
 
+
+def drivers_probe() -> ProbeResult:
+    blocked = _windows_only("Drivers")
+    if blocked:
+        return blocked
+    try:
+        drivers = run_json(
+            "Get-CimInstance Win32_PnPSignedDriver | "
+            "Select-Object DeviceName,DeviceClass,Manufacturer,DriverProviderName,DriverVersion,DriverDate,IsSigned"
+        )
+        if isinstance(drivers, dict):
+            drivers = [drivers]
+        drivers = drivers or []
+        unsigned = sum(1 for item in drivers if item.get("IsSigned") is False)
+        return ProbeResult("Drivers", Status.OK, [
+            Metric("count", len(drivers), source="Win32_PnPSignedDriver"),
+            Metric("unsigned_count", unsigned, source="Win32_PnPSignedDriver"),
+            Metric("items", drivers, source="Win32_PnPSignedDriver"),
+        ], source="Win32_PnPSignedDriver")
+    except Exception as exc:
+        return ProbeResult("Drivers", Status.FAILED, message=str(exc), source="Win32_PnPSignedDriver")
+
+
+def devices_probe() -> ProbeResult:
+    blocked = _windows_only("Devices")
+    if blocked:
+        return blocked
+    try:
+        devices = run_json(
+            "Get-CimInstance Win32_PnPEntity | "
+            "Where-Object { $_.ConfigManagerErrorCode -ne 0 } | "
+            "Select-Object Name,Manufacturer,PNPClass,DeviceID,ConfigManagerErrorCode"
+        )
+        if isinstance(devices, dict):
+            devices = [devices]
+        devices = devices or []
+        return ProbeResult("Devices", Status.OK, [
+            Metric("problem_count", len(devices), source="Win32_PnPEntity"),
+            Metric("problems", devices, source="Win32_PnPEntity"),
+        ], source="Win32_PnPEntity")
+    except Exception as exc:
+        return ProbeResult("Devices", Status.FAILED, message=str(exc), source="Win32_PnPEntity")
+
+
+def network_probe() -> ProbeResult:
+    blocked = _windows_only("Network")
+    if blocked:
+        return blocked
+    try:
+        adapters = run_json(
+            "Get-CimInstance Win32_NetworkAdapterConfiguration | "
+            "Where-Object { $_.IPEnabled -eq $true } | "
+            "Select-Object Description,MACAddress,IPAddress,DefaultIPGateway,DNSServerSearchOrder,DHCPEnabled"
+        )
+        if isinstance(adapters, dict):
+            adapters = [adapters]
+        adapters = adapters or []
+        return ProbeResult("Network", Status.OK, [
+            Metric("adapter_count", len(adapters), source="Win32_NetworkAdapterConfiguration"),
+            Metric("adapters", adapters, source="Win32_NetworkAdapterConfiguration"),
+        ], source="Win32_NetworkAdapterConfiguration")
+    except Exception as exc:
+        return ProbeResult("Network", Status.FAILED, message=str(exc), source="Win32_NetworkAdapterConfiguration")
+
+
+def integrity_probe() -> ProbeResult:
+    blocked = _windows_only("Integrity")
+    if blocked:
+        return blocked
+    try:
+        script = (
+            "$pending=$false; "
+            "$paths=@("
+            "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending',"
+            "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired'"
+            "); "
+            "foreach($p in $paths){ if(Test-Path $p){$pending=$true} }; "
+            "[PSCustomObject]@{PendingReboot=$pending}"
+        )
+        data = run_json(script)
+        return ProbeResult("Integrity", Status.NOT_CHECKED, [
+            Metric("pending_reboot", bool(data.get("PendingReboot")), source="Windows servicing registry"),
+            Metric("sfc_checked", False, source="policy"),
+            Metric("dism_checked", False, source="policy"),
+        ], message="SFC e DISM não foram executados; a integridade de arquivos do sistema ainda não foi confirmada.", source="servicing state")
+    except Exception as exc:
+        return ProbeResult("Integrity", Status.PARTIAL, message=str(exc), source="servicing state")
+
 def collect_all() -> list[ProbeResult]:
-    probes = [windows_probe, cpu_probe, ram_probe, gpu_probe, storage_probe, motherboard_probe, bios_probe, power_probe, secure_boot_probe, security_probe, startup_probe, update_probe]
+    probes = [windows_probe, cpu_probe, ram_probe, gpu_probe, storage_probe, motherboard_probe, bios_probe, power_probe, secure_boot_probe, security_probe, startup_probe, update_probe, drivers_probe, devices_probe, network_probe, integrity_probe]
     results: list[ProbeResult] = []
     for probe in probes:
         try:
