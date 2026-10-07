@@ -1,0 +1,24 @@
+name: Zeus PC CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH="$pwd\src"
+          python -m unittest discover -s tests -v
+      - name: Compile Python
+        shell: pwsh
+        run: |
+          python -m compileall src
