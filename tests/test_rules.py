@@ -43,6 +43,18 @@ class RuleContextTests(unittest.TestCase):
         result = build_recommendations([power], "GAMING")
         self.assertFalse(any(item.id == "power.profile-alignment.v1" for item in result))
 
+    def test_device_problem_becomes_manual_review(self):
+        devices = ProbeResult("Devices", Status.OK, [Metric("problem_count", 2)])
+        result = build_recommendations([devices], "GENERAL")
+        item = next(entry for entry in result if entry.id == "devices.problem-detected.v1")
+        self.assertEqual(item.status, "MANUAL_REVIEW")
+
+    def test_pending_reboot_is_recommended(self):
+        integrity = ProbeResult("Integrity", Status.NOT_CHECKED, [Metric("pending_reboot", True)])
+        result = build_recommendations([integrity], "GENERAL")
+        item = next(entry for entry in result if entry.id == "windows.pending-reboot.v1")
+        self.assertEqual(item.status, "RECOMMENDED")
+
 
 if __name__ == "__main__":
     unittest.main()
