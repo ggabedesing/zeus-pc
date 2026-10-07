@@ -11,16 +11,39 @@ from . import BUILD, __version__
 from .actions import list_power_plans, set_power_plan
 from .engine import build_recommendations
 from .observer import collect_sample
+from .persistence import ZeusDatabase
 from .probes import collect_all
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
+DATA = ROOT / "data"
+DB = ZeusDatabase(DATA / "zeus.db")
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ZEUS_PORT", "8000"))
 
 
 def dumps(payload) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+
+def run_scan(profile: str, database: ZeusDatabase = DB) -> dict:
+    snapshot = collect_all()
+    recommendations = build_recommendations(snapshot, profile)
+    snapshot_payload = [item.to_dict() for item in snapshot]
+    recommendation_payload = [item.to_dict() for item in recommendations]
+
+    database.initialize()
+    scan_id = database.record_scan(
+        profile,
+        snapshot_payload,
+        recommendation_payload,
+    )
+    return {
+        "scan_id": scan_id,
+        "snapshot": snapshot_payload,
+        "profile": profile.upper(),
+        "recommendations": recommendation_payload,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -49,22 +72,30 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         if path == "/api/status":
+            health = DB.initialize()
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
                 "execution_mode": "Restricted",
                 "enabled_actions": ["SET_ACTIVE_POWER_PLAN"],
                 "host": HOST,
+                "persistence": {
+                    "schema_version": health.schema_version,
+                    "writable": health.writable,
+                },
             })
         if path == "/api/scan":
-            snapshot = collect_all()
             profile = parse_qs(parsed.query).get("profile", ["GENERAL"])[0]
-            recommendations = build_recommendations(snapshot, profile)
-            return self.send_json({
-                "snapshot": [item.to_dict() for item in snapshot],
-                "profile": profile.upper(),
-                "recommendations": [item.to_dict() for item in recommendations],
-            })
+            return self.send_json(run_scan(profile))
+        if path == "/api/history":
+            query = parse_qs(parsed.query)
+            limit_raw = query.get("limit", ["20"])[0]
+            try:
+                limit = int(limit_raw)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            DB.initialize()
+            return self.send_json({"scans": DB.recent_scans(limit)})
         if path == "/api/observer/sample":
             return self.send_json(collect_sample().to_dict())
         if path == "/api/power-plans":
@@ -103,6 +134,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     WEB.mkdir(parents=True, exist_ok=True)
+    DATA.mkdir(parents=True, exist_ok=True)
+    DB.initialize()
     print(f"Zeus PC {__version__} ({BUILD})")
     print(f"http://{HOST}:{PORT}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
