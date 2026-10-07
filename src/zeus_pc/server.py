@@ -5,7 +5,7 @@ import mimetypes
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import BUILD, __version__
 from .actions import list_power_plans, set_power_plan
@@ -46,7 +46,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(raw.decode("utf-8") or "{}")
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)\n        path = parsed.path
         if path == "/api/status":
             return self.send_json({
                 "version": __version__,
@@ -57,10 +57,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/scan":
             snapshot = collect_all()
-            recommendations = build_recommendations(snapshot)
+            profile = parse_qs(parsed.query).get("profile", ["GENERAL"])[0]\n            recommendations = build_recommendations(snapshot, profile)
             return self.send_json({
                 "snapshot": [item.to_dict() for item in snapshot],
-                "recommendations": [item.to_dict() for item in recommendations],
+                "profile": profile.upper(),\n                "recommendations": [item.to_dict() for item in recommendations],
             })
         if path == "/api/observer/sample":
             return self.send_json(collect_sample().to_dict())
