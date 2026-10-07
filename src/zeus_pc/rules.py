@@ -67,6 +67,43 @@ def evaluate_rules(context: RuleContext) -> list[Recommendation]:
             risk="LOW",
         ))
 
+    problem_devices = context.metric("Devices", "problem_count", 0) or 0
+    if int(problem_devices) > 0:
+        recommendations.append(Recommendation(
+            id="devices.problem-detected.v1",
+            title="Dispositivos com erro foram detectados",
+            category="DRIVERS",
+            status="MANUAL_REVIEW",
+            reason=f"O Windows reportou {int(problem_devices)} dispositivo(s) com código de problema.",
+            benefit="STABILITY",
+            risk="LOW",
+        ))
+
+    unsigned_drivers = context.metric("Drivers", "unsigned_count", 0) or 0
+    if int(unsigned_drivers) > 0:
+        recommendations.append(Recommendation(
+            id="drivers.unsigned-review.v1",
+            title="Revise drivers não assinados",
+            category="DRIVERS",
+            status="MANUAL_REVIEW",
+            reason=f"Foram encontrados {int(unsigned_drivers)} driver(s) sem assinatura confirmada pelo inventário atual.",
+            benefit="STABILITY_SECURITY",
+            risk="LOW",
+        ))
+
+    pending_reboot = context.metric("Integrity", "pending_reboot", False)
+    if pending_reboot is True:
+        recommendations.append(Recommendation(
+            id="windows.pending-reboot.v1",
+            title="O Windows precisa concluir uma reinicialização",
+            category="WINDOWS",
+            status="RECOMMENDED",
+            reason="O estado de servicing indica uma reinicialização pendente.",
+            benefit="STABILITY",
+            risk="LOW",
+            reversible=False,
+        ))
+
     pending = context.metric("Windows Update", "pending_count")
     if isinstance(pending, int) and pending > 0:
         recommendations.append(Recommendation(
