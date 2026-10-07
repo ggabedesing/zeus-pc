@@ -44,7 +44,7 @@ def evaluate_rules(context: RuleContext) -> list[Recommendation]:
         root = str(volume.get("root", "")).upper()
         if root.startswith("C:") and float(volume.get("free_pct", 100)) < 15:
             recommendations.append(Recommendation(
-                id="storage.low-space.v1",
+                id="storage.low-space",
                 title="Libere espaço no disco do sistema",
                 category="STORAGE",
                 status="RECOMMENDED",
