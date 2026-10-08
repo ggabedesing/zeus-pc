@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _UNSET = object()
 
 
@@ -73,6 +73,7 @@ class ZeusDatabase:
                     state TEXT NOT NULL,
                     args_json TEXT NOT NULL,
                     before_state_json TEXT NOT NULL,
+                    apply_json TEXT,
                     verify_json TEXT,
                     rollback_json TEXT,
                     error_text TEXT,
@@ -82,6 +83,16 @@ class ZeusDatabase:
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(transaction_journal)"
+                ).fetchall()
+            }
+            if "apply_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE transaction_journal ADD COLUMN apply_json TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_transaction_journal_updated
@@ -241,6 +252,7 @@ class ZeusDatabase:
         *,
         updated_at: str,
         state: str | None = None,
+        apply: dict[str, Any] | None | object = _UNSET,
         verify: dict[str, Any] | None | object = _UNSET,
         rollback: dict[str, Any] | None | object = _UNSET,
         error_text: str | None | object = _UNSET,
@@ -253,6 +265,19 @@ class ZeusDatabase:
         if state is not None:
             assignments.append("state = ?")
             values.append(state)
+        if apply is not _UNSET:
+            assignments.append("apply_json = ?")
+            values.append(
+                (
+                    json.dumps(
+                        apply,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if apply is not None
+                    else None
+                )
+            )
         if verify is not _UNSET:
             assignments.append("verify_json = ?")
             values.append(
@@ -387,6 +412,11 @@ class ZeusDatabase:
             "state": row["state"],
             "args": json.loads(row["args_json"]),
             "before_state": json.loads(row["before_state_json"]),
+            "apply": (
+                json.loads(row["apply_json"])
+                if row["apply_json"]
+                else None
+            ),
             "verify": (
                 json.loads(row["verify_json"])
                 if row["verify_json"]
