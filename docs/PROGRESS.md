@@ -15,31 +15,33 @@ Updated: 2026-10-08
 - Read-only inventory for TPM, Firewall profiles, proxy and network link state.
 - Read-only storage health, reliability, TRIM and bounded Windows event summaries.
 - Installed software inventory plus virtualization, hypervisor, SLAT, VBS and Windows optional-feature context.
+- Native CPU/RAM Observer sampling, bounded ring buffer, history and baseline APIs.
 
 ## Current increment
-Increment 009 — Native Observer sampling and bounded ring buffer.
+Increment 010A — Background Observer runner and explicit sessions.
 
 Status:
-- branch: auto/observer-native-ring-buffer;
-- CPU sampling moved from PowerShell/CIM subprocesses to GetSystemTimes through ctypes;
-- RAM sampling moved from PowerShell/CIM subprocesses to GlobalMemoryStatusEx through ctypes;
-- first CPU sample correctly remains unknown until a time delta exists;
-- NVIDIA GPU sampling remains via nvidia-smi for this subpart;
-- nvidia-smi path lookup is cached;
-- bounded, thread-safe in-memory ring buffer added;
-- baseline summaries calculate count/min/max/average while skipping unavailable metrics;
-- /api/observer/sample now records samples;
-- /api/observer/history and /api/observer/baseline added;
-- observer config state and buffer capacity exposed in /api/status;
-- no process/power/scheduler mutation is enabled;
-- tests added for CPU delta math, ring retention, missing values and provider recording;
+- branch: auto/observer-background-sessions;
+- daemon background sampler added;
+- observer_enabled now controls background sampling lifecycle;
+- adaptive cadence implemented: 1s high load, 2s moderate/unknown, 5s light load;
+- one active session at a time with UUID, label, mode, start/end timestamps;
+- active session id is attached to samples;
+- duplicate session start preserves the current session instead of destroying evidence;
+- session-filtered history/baseline supported;
+- /api/observer/status and /api/observer/sessions added;
+- POST session start/stop endpoints added;
+- server startup/config/shutdown synchronize Observer runner state;
+- structured logs record observer/session lifecycle;
+- no process priority, affinity, power, network or scheduler mutation is enabled;
+- tests added for cadence policy, session lifecycle/tagging and runner start/stop;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 010 — Observer sessions, adaptive sampling and process-level performance context.
+Increment 010B — Bounded process-level performance context at a slower cadence.
 
 ## Later order
-1. Complete Observer/session baselines.
+1. Complete Observer process/session evidence.
 2. Formal Optimization Engine.
 3. Transaction Engine.
 4. Safe action catalog.
