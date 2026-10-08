@@ -12,6 +12,13 @@ from dataclasses import asdict, dataclass
 from functools import lru_cache
 from typing import Any, Callable
 
+from .process_observer import (
+    PROCESS_OBSERVER,
+    ProcessObserverStore,
+    ProcessSnapshot,
+    collect_process_snapshot,
+)
+
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SESSION_MODES = {
     "AUTO",
@@ -297,14 +304,25 @@ class ObserverRunner:
         store: ObserverStore,
         provider: Callable[[], Sample] = collect_sample,
         session_history: int = 20,
+        process_provider: Callable[[], ProcessSnapshot] | None = None,
+        process_store: ProcessObserverStore | None = None,
+        process_interval_seconds: float = 15.0,
     ) -> None:
         self.store = store
         self._provider = provider
+        self._process_provider = process_provider
+        self._process_store = process_store
+        self._process_interval_seconds = max(
+            float(process_interval_seconds),
+            5.0,
+        )
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._current_interval = 2.0
         self._last_sample_time: float | None = None
+        self._last_process_monotonic: float | None = None
+        self._last_process_sample_time: float | None = None
         self._active_session: ObserverSession | None = None
         self._sessions: deque[ObserverSession] = deque(
             maxlen=max(int(session_history), 1)
@@ -360,7 +378,45 @@ class ObserverRunner:
                 sample.session_id = self._active_session.id
             self._last_sample_time = sample.timestamp
         self.store.record(sample)
+        self.collect_process_context()
         return sample
+
+    def collect_process_context(
+        self,
+        force: bool = False,
+    ) -> ProcessSnapshot | None:
+        if self._process_provider is None or self._process_store is None:
+            return None
+
+        monotonic_now = time.monotonic()
+        with self._lock:
+            due = (
+                force
+                or self._last_process_monotonic is None
+                or monotonic_now - self._last_process_monotonic
+                >= self._process_interval_seconds
+            )
+            if not due:
+                return None
+            self._last_process_monotonic = monotonic_now
+            session_id = (
+                self._active_session.id
+                if self._active_session is not None
+                else None
+            )
+
+        try:
+            snapshot = self._process_provider()
+        except Exception:
+            with self._lock:
+                self._last_process_monotonic = None
+            return None
+
+        snapshot.session_id = session_id
+        self._process_store.record(snapshot)
+        with self._lock:
+            self._last_process_sample_time = snapshot.timestamp
+        return snapshot
 
     def start_session(
         self,
@@ -421,10 +477,16 @@ class ObserverRunner:
                 "running": self.is_running(),
                 "current_interval_seconds": self._current_interval,
                 "last_sample_time": self._last_sample_time,
+                "process_interval_seconds": self._process_interval_seconds,
+                "last_process_sample_time": self._last_process_sample_time,
                 "active_session": active,
                 "last_session": last_session,
             }
 
 
 OBSERVER = ObserverStore()
-OBSERVER_RUNNER = ObserverRunner(OBSERVER)
+OBSERVER_RUNNER = ObserverRunner(
+    OBSERVER,
+    process_provider=collect_process_snapshot,
+    process_store=PROCESS_OBSERVER,
+)
