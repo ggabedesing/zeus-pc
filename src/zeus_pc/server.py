@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlparse
 
 from . import BUILD, __version__
 from .actions import list_power_plans, set_power_plan
+from .app_logging import StructuredLog
+from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
 from .observer import collect_sample
 from .persistence import ZeusDatabase
@@ -18,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
 DATA = ROOT / "data"
 DB = ZeusDatabase(DATA / "zeus.db")
+APP_LOG = StructuredLog(DATA / "zeus-app.jsonl", max_entries=2000)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ZEUS_PORT", "8000"))
 
@@ -26,7 +29,7 @@ def dumps(payload) -> bytes:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-def run_scan(profile: str, database: ZeusDatabase = DB) -> dict:
+def run_scan(profile: str, database: ZeusDatabase = DB, app_log: StructuredLog = APP_LOG) -> dict:
     snapshot = collect_all()
     recommendations = build_recommendations(snapshot, profile)
     snapshot_payload = [item.to_dict() for item in snapshot]
@@ -37,6 +40,13 @@ def run_scan(profile: str, database: ZeusDatabase = DB) -> dict:
         profile,
         snapshot_payload,
         recommendation_payload,
+    )
+    app_log.write(
+        "scan_completed",
+        scan_id=scan_id,
+        profile=profile.upper(),
+        domain_count=len(snapshot_payload),
+        recommendation_count=len(recommendation_payload),
     )
     return {
         "scan_id": scan_id,
@@ -71,8 +81,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        config = load_config(DB)
+
         if path == "/api/status":
-            health = DB.initialize()
+            health = DB.health()
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
@@ -83,18 +95,24 @@ class Handler(BaseHTTPRequestHandler):
                     "schema_version": health.schema_version,
                     "writable": health.writable,
                 },
+                "config": {
+                    "schema_version": CONFIG_SCHEMA_VERSION,
+                    "selected_profile": config.selected_profile,
+                },
             })
+        if path == "/api/config":
+            return self.send_json({"config": config.to_dict()})
         if path == "/api/scan":
-            profile = parse_qs(parsed.query).get("profile", ["GENERAL"])[0]
+            query = parse_qs(parsed.query)
+            profile = query.get("profile", [config.selected_profile])[0]
             return self.send_json(run_scan(profile))
         if path == "/api/history":
             query = parse_qs(parsed.query)
-            limit_raw = query.get("limit", ["20"])[0]
+            limit_raw = query.get("limit", [str(config.history_limit)])[0]
             try:
                 limit = int(limit_raw)
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
-            DB.initialize()
             return self.send_json({"scans": DB.recent_scans(limit)})
         if path == "/api/observer/sample":
             return self.send_json(collect_sample().to_dict())
@@ -121,14 +139,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/api/actions/power-plan":
-            return self.send_json({"error": "Acao bloqueada."}, 404)
         try:
             payload = self.read_json()
-            guid = str(payload.get("guid") or "")
-            result = set_power_plan(guid)
-            return self.send_json({"ok": result.ok, "message": result.message}, 200 if result.ok else 409)
+
+            if path == "/api/config":
+                config = save_config(DB, payload)
+                APP_LOG.write(
+                    "config_updated",
+                    selected_profile=config.selected_profile,
+                    history_limit=config.history_limit,
+                    observer_enabled=config.observer_enabled,
+                )
+                return self.send_json({"config": config.to_dict()})
+
+            if path == "/api/actions/power-plan":
+                guid = str(payload.get("guid") or "")
+                result = set_power_plan(guid)
+                return self.send_json(
+                    {"ok": result.ok, "message": result.message},
+                    200 if result.ok else 409,
+                )
+
+            return self.send_json({"error": "Acao bloqueada."}, 404)
         except Exception as exc:
+            APP_LOG.write(
+                "request_failed",
+                level="ERROR",
+                path=path,
+                error_type=type(exc).__name__,
+            )
             return self.send_json({"ok": False, "message": str(exc)}, 400)
 
 
@@ -136,6 +175,13 @@ def main():
     WEB.mkdir(parents=True, exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
     DB.initialize()
+    config = load_config(DB)
+    APP_LOG.write(
+        "server_started",
+        version=__version__,
+        build=BUILD,
+        selected_profile=config.selected_profile,
+    )
     print(f"Zeus PC {__version__} ({BUILD})")
     print(f"http://{HOST}:{PORT}")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
@@ -144,6 +190,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        APP_LOG.write("server_stopped")
         server.server_close()
 
 
