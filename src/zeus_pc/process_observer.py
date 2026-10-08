@@ -233,6 +233,13 @@ class NativeProcessSampler:
             0,
             pid,
         )
+        can_read_memory = bool(handle)
+        if not handle:
+            handle = kernel32.OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                pid,
+            )
         if not handle:
             return None
 
@@ -259,7 +266,7 @@ class NativeProcessSampler:
             counters = _PROCESS_MEMORY_COUNTERS_EX()
             counters.cb = ctypes.sizeof(_PROCESS_MEMORY_COUNTERS_EX)
             working_set: int | None = None
-            if psapi.GetProcessMemoryInfo(
+            if can_read_memory and psapi.GetProcessMemoryInfo(
                 handle,
                 ctypes.byref(counters),
                 counters.cb,
