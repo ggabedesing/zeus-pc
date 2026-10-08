@@ -8,7 +8,9 @@ tmp/
 temp/
 dist/
 build/
+data/
 *.log
+*.jsonl
 *.db
 *.db-journal
 *.db-shm

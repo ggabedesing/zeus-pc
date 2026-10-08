@@ -3,35 +3,32 @@
 Updated: 2026-10-07
 
 ## Completed foundations
-- Clean repository and CI on Windows.
-- Read-only diagnostics for Windows, CPU, RAM, GPU, storage, motherboard, BIOS, power, Secure Boot, Defender, startup and Windows Update.
-- Additional read-only diagnostics for drivers, problematic devices, network adapters and pending reboot indicators.
+- Clean repository and Windows CI.
+- Read-only core diagnostics.
+- Extended diagnostics for drivers, devices, network and pending reboot.
 - Contextual Rule Engine with explicit profiles.
-- SQLite persistence foundation with schema versioning, settings storage and scan history primitives.
+- SQLite persistence with schema versioning, settings and scan history.
+- Real scan history integration with scan_id and /api/history.
 
 ## Current increment
-Increment 003 — Scan history integration.
-
-Status:
-- branch: auto/scan-history-integration
-- completed scan flow now persists results;
-- scan responses include scan_id;
-- history endpoint added;
-- persistence health exposed in status;
-- integration test added;
-- technical increment document added;
-- waiting for CI validation and review before merge.
-
-## Next increment
 Increment 004 — Versioned application configuration and structured logging.
 
-Planned scope:
-- explicit config schema/version;
-- persisted selected profile and safe app preferences;
-- structured application log records;
-- bounded retention;
-- no action/audit journal yet;
-- tests for defaults, migration boundary and malformed config handling.
+Status:
+- branch: auto/config-logging-foundation;
+- config schema version 1 implemented;
+- selected profile, history limit and observer preference persisted;
+- safe normalization and partial updates implemented;
+- GET/POST /api/config integrated;
+- scans use persisted profile when none is supplied;
+- history uses persisted limit when none is supplied;
+- bounded JSONL structured app logging implemented;
+- startup, shutdown, scan, config update and request failure events integrated;
+- runtime data/logs ignored by Git;
+- unit and integration tests added;
+- waiting for CI validation before merge.
+
+## Next increment
+Increment 005 — Deep inventory expansion, starting with services/tasks/processes in read-only mode.
 
 ## Later order
 1. Deep inventory.
