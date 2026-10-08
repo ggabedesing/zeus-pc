@@ -69,7 +69,9 @@ def load_config(database: ZeusDatabase) -> AppConfig:
 
 
 def save_config(database: ZeusDatabase, payload: Any) -> AppConfig:
-    config = normalize_config(payload)
-    database.initialize()
+    current = load_config(database).to_dict()
+    if isinstance(payload, dict):
+        current.update(payload)
+    config = normalize_config(current)
     database.set_setting(CONFIG_KEY, config.to_dict())
     return config
