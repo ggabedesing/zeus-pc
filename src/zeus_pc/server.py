@@ -12,7 +12,7 @@ from .actions import list_power_plans, set_power_plan
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
-from .observer import OBSERVER
+from .observer import OBSERVER, OBSERVER_RUNNER
 from .persistence import ZeusDatabase
 from .probes import collect_all
 
@@ -61,6 +61,15 @@ def _parse_limit(query: dict[str, list[str]], default: int) -> int:
     return int(raw)
 
 
+def _sync_observer_runner(enabled: bool) -> None:
+    if enabled:
+        if OBSERVER_RUNNER.start():
+            APP_LOG.write("observer_started")
+    else:
+        if OBSERVER_RUNNER.stop():
+            APP_LOG.write("observer_stopped")
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ZeusPC/0.1"
 
@@ -86,6 +95,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        query = parse_qs(parsed.query)
         config = load_config(DB)
 
         if path == "/api/status":
@@ -107,41 +117,62 @@ class Handler(BaseHTTPRequestHandler):
                 "observer": {
                     "enabled": config.observer_enabled,
                     "buffer_capacity": OBSERVER.max_samples,
+                    **OBSERVER_RUNNER.status(),
                 },
             })
         if path == "/api/config":
             return self.send_json({"config": config.to_dict()})
         if path == "/api/scan":
-            query = parse_qs(parsed.query)
             profile = query.get("profile", [config.selected_profile])[0]
             return self.send_json(run_scan(profile))
         if path == "/api/history":
-            query = parse_qs(parsed.query)
             try:
                 limit = _parse_limit(query, config.history_limit)
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({"scans": DB.recent_scans(limit)})
+        if path == "/api/observer/status":
+            return self.send_json({
+                "enabled": config.observer_enabled,
+                "buffer_capacity": OBSERVER.max_samples,
+                **OBSERVER_RUNNER.status(),
+            })
         if path == "/api/observer/sample":
             if not config.observer_enabled:
                 return self.send_json({"error": "Observer desativado."}, 409)
-            return self.send_json(OBSERVER.record().to_dict())
+            return self.send_json(OBSERVER_RUNNER.sample_once().to_dict())
         if path == "/api/observer/history":
-            query = parse_qs(parsed.query)
             try:
                 limit = _parse_limit(query, 60)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            session_id = query.get("session_id", [None])[0]
+            return self.send_json({
+                "samples": [
+                    item.to_dict()
+                    for item in OBSERVER.recent(limit, session_id=session_id)
+                ]
+            })
+        if path == "/api/observer/baseline":
+            try:
+                limit = _parse_limit(query, 60)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            session_id = query.get("session_id", [None])[0]
+            return self.send_json(
+                OBSERVER.baseline(limit, session_id=session_id)
+            )
+        if path == "/api/observer/sessions":
+            try:
+                limit = _parse_limit(query, 10)
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({
-                "samples": [item.to_dict() for item in OBSERVER.recent(limit)]
+                "sessions": [
+                    item.to_dict()
+                    for item in OBSERVER_RUNNER.recent_sessions(limit)
+                ]
             })
-        if path == "/api/observer/baseline":
-            query = parse_qs(parsed.query)
-            try:
-                limit = _parse_limit(query, 60)
-            except ValueError:
-                return self.send_json({"error": "limit invalido."}, 400)
-            return self.send_json(OBSERVER.baseline(limit))
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
@@ -170,6 +201,7 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/config":
                 config = save_config(DB, payload)
+                _sync_observer_runner(config.observer_enabled)
                 APP_LOG.write(
                     "config_updated",
                     selected_profile=config.selected_profile,
@@ -177,6 +209,38 @@ class Handler(BaseHTTPRequestHandler):
                     observer_enabled=config.observer_enabled,
                 )
                 return self.send_json({"config": config.to_dict()})
+
+            if path == "/api/observer/session/start":
+                config = load_config(DB)
+                if not config.observer_enabled:
+                    return self.send_json({"error": "Observer desativado."}, 409)
+                session, created = OBSERVER_RUNNER.start_session(
+                    label=str(payload.get("label") or ""),
+                    mode=str(payload.get("mode") or "AUTO"),
+                )
+                if created:
+                    APP_LOG.write(
+                        "observer_session_started",
+                        session_id=session.id,
+                        label=session.label,
+                        mode=session.mode,
+                    )
+                return self.send_json({
+                    "created": created,
+                    "session": session.to_dict(),
+                })
+
+            if path == "/api/observer/session/stop":
+                session = OBSERVER_RUNNER.stop_session()
+                if session is None:
+                    return self.send_json({"error": "Nenhuma sessao ativa."}, 409)
+                APP_LOG.write(
+                    "observer_session_stopped",
+                    session_id=session.id,
+                    label=session.label,
+                    mode=session.mode,
+                )
+                return self.send_json({"session": session.to_dict()})
 
             if path == "/api/actions/power-plan":
                 guid = str(payload.get("guid") or "")
@@ -202,6 +266,7 @@ def main():
     DATA.mkdir(parents=True, exist_ok=True)
     DB.initialize()
     config = load_config(DB)
+    _sync_observer_runner(config.observer_enabled)
     APP_LOG.write(
         "server_started",
         version=__version__,
@@ -216,6 +281,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        OBSERVER_RUNNER.stop()
         APP_LOG.write("server_stopped")
         server.server_close()
 
