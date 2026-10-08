@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from . import BUILD, __version__
-from .actions import list_power_plans, set_power_plan
+from .actions import list_power_plans
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
@@ -17,12 +17,14 @@ from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
+from .transaction import TransactionEngine
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
 DATA = ROOT / "data"
 DB = ZeusDatabase(DATA / "zeus.db")
 APP_LOG = StructuredLog(DATA / "zeus-app.jsonl", max_entries=2000)
+TRANSACTIONS = TransactionEngine(DB)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ZEUS_PORT", "8000"))
 
@@ -113,8 +115,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
-                "execution_mode": "Restricted",
-                "enabled_actions": ["SET_ACTIVE_POWER_PLAN"],
+                "execution_mode": "TransactionFoundation",
+                "enabled_actions": [],
+                "preparable_actions": TRANSACTIONS.registry.ids(),
                 "host": HOST,
                 "persistence": {
                     "schema_version": health.schema_version,
@@ -242,6 +245,15 @@ class Handler(BaseHTTPRequestHandler):
                     for item in OBSERVER_RUNNER.recent_sessions(limit)
                 ]
             })
+        if path == "/api/transactions":
+            try:
+                limit = _parse_limit(query, 20)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            return self.send_json({
+                "transactions": TRANSACTIONS.recent(limit),
+                "execution_enabled": False,
+            })
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
@@ -311,12 +323,46 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return self.send_json({"session": session.to_dict()})
 
-            if path == "/api/actions/power-plan":
-                guid = str(payload.get("guid") or "")
-                result = set_power_plan(guid)
+            if path == "/api/transactions/prepare":
+                args = payload.get("args")
+                if not isinstance(args, dict):
+                    raise ValueError("args deve ser um objeto.")
+                prepared = TRANSACTIONS.prepare(
+                    str(payload.get("action_id") or ""),
+                    args,
+                )
+                APP_LOG.write(
+                    "transaction_prepared",
+                    transaction_id=prepared.transaction_id,
+                    action_id=prepared.action_id,
+                )
                 return self.send_json(
-                    {"ok": result.ok, "message": result.message},
-                    200 if result.ok else 409,
+                    {"transaction": prepared.to_dict()},
+                    201,
+                )
+
+            if path == "/api/transactions/consent":
+                transaction = TRANSACTIONS.consume_consent(
+                    str(payload.get("transaction_id") or ""),
+                    str(payload.get("consent_token") or ""),
+                )
+                APP_LOG.write(
+                    "transaction_consented",
+                    transaction_id=transaction["transaction_id"],
+                    action_id=transaction["action_id"],
+                )
+                return self.send_json({"transaction": transaction})
+
+            if path == "/api/actions/power-plan":
+                return self.send_json(
+                    {
+                        "ok": False,
+                        "message": (
+                            "Execucao direta desativada. "
+                            "Acoes reais exigirao o Transaction Engine completo."
+                        ),
+                    },
+                    409,
                 )
 
             return self.send_json({"error": "Acao bloqueada."}, 404)
