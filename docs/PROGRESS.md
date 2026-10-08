@@ -17,32 +17,33 @@ Updated: 2026-10-08
 - Installed software inventory plus virtualization, hypervisor, SLAT, VBS and Windows optional-feature context.
 - Native CPU/RAM Observer sampling, bounded ring buffer, history and baseline APIs.
 - Background Observer runner, adaptive cadence and explicit session lifecycle.
+- Native bounded process CPU/memory context linked to Observer sessions.
 
 ## Current increment
-Increment 010B — Native process performance context.
+Increment 011 — Formal Optimization Engine, dry-run foundation.
 
 Status:
-- branch: auto/observer-process-context;
-- native Toolhelp32 process enumeration added;
-- GetProcessTimes deltas provide per-process CPU share without PowerShell;
-- PID reuse is guarded by process creation time;
-- K32/PSAPI working-set memory is collected when access is available;
-- CPU timing can still be collected when process memory access is denied;
-- protected/inaccessible processes are counted explicitly instead of reported as zero;
-- process context is sampled at a slower 15-second cadence;
-- only bounded top CPU/top memory records are retained;
-- process snapshot history is bounded and session-filterable;
-- process snapshots inherit active observer session_id;
-- GET /api/observer/processes added;
-- no command lines, process contents, priority, affinity or termination actions are collected/enabled;
-- tests added for CPU delta math, PID reuse, top-N ordering, bounded history and session tagging;
+- branch: auto/formal-optimization-engine;
+- formal statuses added: APPLY_RECOMMENDED, ALREADY_CORRECT, NOT_APPLICABLE, BLOCKED, MANUAL_REVIEW and NO_ACTION;
+- structured evidence and confidence HIGH/MEDIUM/LOW added;
+- findings expose risk, reversibility, semantic action_id, blockers and automation eligibility;
+- OptimizationPlan carries plan_id, timestamp, normalized profile, summary, mode=DRY_RUN and execution_ready=false;
+- existing contextual Rule Engine is bridged into the formal plan instead of duplicated;
+- incomplete core diagnostic coverage blocks a false no-action conclusion;
+- sustained Observer CPU/RAM pressure requires minimum sample coverage before generating findings;
+- top process evidence is attached when available;
+- sustained gaming GPU saturation is explanatory NO_ACTION, not a blind tweak;
+- /api/scan now includes optimization_plan;
+- GET /api/optimization/plan builds a plan from the latest persisted scan plus current/session Observer evidence;
+- no new mutable action or execution endpoint is enabled;
+- tests added for status mapping, no-action, coverage blocker, Observer thresholds, process evidence, GPU-bound interpretation and snapshot restoration;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 011 — Formal Optimization Engine: typed findings and dry-run optimization plans consuming inventory plus Observer evidence.
+Increment 012 — Optimization compatibility/conflict layer: applicability, conflicts, dependencies and action-readiness gates before Transaction Engine.
 
 ## Later order
-1. Formal Optimization Engine.
+1. Complete formal Optimization Engine.
 2. Transaction Engine.
 3. Safe action catalog.
 4. Drivers and updates.
