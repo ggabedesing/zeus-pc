@@ -14,27 +14,32 @@ Updated: 2026-10-08
 - Read-only inventory for services, scheduled tasks and processes.
 - Read-only inventory for TPM, Firewall profiles, proxy and network link state.
 - Read-only storage health, reliability, TRIM and bounded Windows event summaries.
+- Installed software inventory plus virtualization, hypervisor, SLAT, VBS and Windows optional-feature context.
 
 ## Current increment
-Increment 008 — Installed software and virtualization context.
+Increment 009 — Native Observer sampling and bounded ring buffer.
 
 Status:
-- branch: auto/software-virtualization-inventory;
-- installed software inventory added from uninstall registry keys;
-- duplicate entries are normalized across machine/user and 32/64-bit scopes;
-- Win32_Product is intentionally not used;
-- virtualization firmware, hypervisor, SLAT and VBS context added;
-- Windows optional-feature inventory added;
-- elevation/unsupported states are explicit;
-- no uninstall, feature mutation, Hyper-V/WSL mutation or security weakening is enabled;
-- tests added for software normalization, virtualization context, feature counts and error classification;
+- branch: auto/observer-native-ring-buffer;
+- CPU sampling moved from PowerShell/CIM subprocesses to GetSystemTimes through ctypes;
+- RAM sampling moved from PowerShell/CIM subprocesses to GlobalMemoryStatusEx through ctypes;
+- first CPU sample correctly remains unknown until a time delta exists;
+- NVIDIA GPU sampling remains via nvidia-smi for this subpart;
+- nvidia-smi path lookup is cached;
+- bounded, thread-safe in-memory ring buffer added;
+- baseline summaries calculate count/min/max/average while skipping unavailable metrics;
+- /api/observer/sample now records samples;
+- /api/observer/history and /api/observer/baseline added;
+- observer config state and buffer capacity exposed in /api/status;
+- no process/power/scheduler mutation is enabled;
+- tests added for CPU delta math, ring retention, missing values and provider recording;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 009 — Observer performance foundation: lower-overhead sampling, ring buffer and session baselines.
+Increment 010 — Observer sessions, adaptive sampling and process-level performance context.
 
 ## Later order
-1. Faster Observer and session baselines.
+1. Complete Observer/session baselines.
 2. Formal Optimization Engine.
 3. Transaction Engine.
 4. Safe action catalog.
