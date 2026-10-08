@@ -215,7 +215,7 @@ class PersistenceMigrationTests(unittest.TestCase):
             health = db.initialize()
 
             self.assertEqual(health.schema_version, SCHEMA_VERSION)
-            self.assertEqual(SCHEMA_VERSION, 2)
+            self.assertEqual(SCHEMA_VERSION, 3)
             self.assertEqual(db.get_setting("legacy"), 123)
             with db.connect() as connection:
                 row = connection.execute(
