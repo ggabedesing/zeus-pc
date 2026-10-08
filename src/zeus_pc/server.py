@@ -13,6 +13,7 @@ from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
 from .observer import OBSERVER, OBSERVER_RUNNER
+from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
@@ -35,6 +36,12 @@ def run_scan(profile: str, database: ZeusDatabase = DB, app_log: StructuredLog =
     recommendations = build_recommendations(snapshot, profile)
     snapshot_payload = [item.to_dict() for item in snapshot]
     recommendation_payload = [item.to_dict() for item in recommendations]
+    optimization_plan = build_optimization_plan(
+        snapshot,
+        profile,
+        observer_baseline=OBSERVER.baseline(60),
+        process_snapshot=PROCESS_OBSERVER.latest(),
+    )
 
     database.initialize()
     scan_id = database.record_scan(
@@ -48,12 +55,14 @@ def run_scan(profile: str, database: ZeusDatabase = DB, app_log: StructuredLog =
         profile=profile.upper(),
         domain_count=len(snapshot_payload),
         recommendation_count=len(recommendation_payload),
+        optimization_plan_id=optimization_plan.plan_id,
     )
     return {
         "scan_id": scan_id,
         "snapshot": snapshot_payload,
-        "profile": profile.upper(),
+        "profile": optimization_plan.profile,
         "recommendations": recommendation_payload,
+        "optimization_plan": optimization_plan.to_dict(),
     }
 
 
@@ -132,6 +141,44 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({"scans": DB.recent_scans(limit)})
+        if path == "/api/optimization/plan":
+            history = DB.recent_scans(1)
+            if not history:
+                profile = query.get(
+                    "profile",
+                    [config.selected_profile],
+                )[0]
+                scan = run_scan(profile)
+                return self.send_json({
+                    "source_scan_id": scan["scan_id"],
+                    "source_scan_created_at": None,
+                    "plan": scan["optimization_plan"],
+                })
+
+            latest = history[0]
+            profile = query.get(
+                "profile",
+                [latest["profile"]],
+            )[0]
+            session_id = query.get("session_id", [None])[0]
+            snapshot = snapshot_from_payload(latest["snapshot"])
+            plan = build_optimization_plan(
+                snapshot,
+                profile,
+                observer_baseline=OBSERVER.baseline(
+                    60,
+                    session_id=session_id,
+                ),
+                process_snapshot=PROCESS_OBSERVER.latest(
+                    session_id=session_id,
+                ),
+            )
+            return self.send_json({
+                "source_scan_id": latest["id"],
+                "source_scan_created_at": latest["created_at"],
+                "session_id": session_id,
+                "plan": plan.to_dict(),
+            })
         if path == "/api/observer/status":
             return self.send_json({
                 "enabled": config.observer_enabled,
