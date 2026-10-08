@@ -567,6 +567,14 @@ def build_optimization_plan(
 
     findings = _deduplicate(findings)
 
+    from .optimization_compatibility import apply_plan_gates
+
+    compatibility = apply_plan_gates(
+        findings,
+        snapshot,
+        context.profile,
+    )
+
     status_counts = {
         status.value: sum(
             1 for item in findings if item.status == status
@@ -588,6 +596,7 @@ def build_optimization_plan(
         "automation_eligible_count": sum(
             1 for item in findings if item.automation_eligible
         ),
+        "compatibility": compatibility,
     }
 
     return OptimizationPlan(
