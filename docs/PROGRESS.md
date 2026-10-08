@@ -18,40 +18,40 @@ Updated: 2026-10-08
 - Native CPU/RAM Observer sampling, bounded ring buffer, history and baseline APIs.
 - Background Observer runner, adaptive cadence and explicit session lifecycle.
 - Native bounded process CPU/memory context linked to Observer sessions.
+- Formal dry-run Optimization Engine with typed findings, evidence, confidence and Observer interpretation.
 
 ## Current increment
-Increment 011 — Formal Optimization Engine, dry-run foundation.
+Increment 012 — Optimization compatibility and conflict gates.
 
 Status:
-- branch: auto/formal-optimization-engine;
-- formal statuses added: APPLY_RECOMMENDED, ALREADY_CORRECT, NOT_APPLICABLE, BLOCKED, MANUAL_REVIEW and NO_ACTION;
-- structured evidence and confidence HIGH/MEDIUM/LOW added;
-- findings expose risk, reversibility, semantic action_id, blockers and automation eligibility;
-- OptimizationPlan carries plan_id, timestamp, normalized profile, summary, mode=DRY_RUN and execution_ready=false;
-- existing contextual Rule Engine is bridged into the formal plan instead of duplicated;
-- incomplete core diagnostic coverage blocks a false no-action conclusion;
-- sustained Observer CPU/RAM pressure requires minimum sample coverage before generating findings;
-- top process evidence is attached when available;
-- sustained gaming GPU saturation is explanatory NO_ACTION, not a blind tweak;
-- /api/scan now includes optimization_plan;
-- GET /api/optimization/plan builds a plan from the latest persisted scan plus current/session Observer evidence;
-- no new mutable action or execution endpoint is enabled;
-- tests added for status mapping, no-action, coverage blocker, Observer thresholds, process evidence, GPU-bound interpretation and snapshot restoration;
+- branch: auto/optimization-compatibility-gates;
+- semantic action policy registry added;
+- SET_ACTIVE_POWER_PLAN policy declares required Windows/Power domains, profile compatibility, risk, confidence, reversibility and security-preserving requirements;
+- unknown action IDs are blocked;
+- required diagnostic domains must be present and Status.OK;
+- APPLY_RECOMMENDED is required before static eligibility;
+- HIGH confidence, allowed risk and reversibility are enforced by policy;
+- security-category actions require an explicitly security-preserving action policy;
+- distinct findings sharing the same semantic action_id create ACTION_COLLISION conflicts;
+- findings receive NON_ACTIONABLE, MANUAL_REVIEW, STATIC_ELIGIBLE or BLOCKED readiness state;
+- STATIC_ELIGIBLE still remains non-executable with TRANSACTION_ENGINE_NOT_AVAILABLE;
+- OptimizationPlan summary now includes compatibility/readiness/conflict report;
+- no execution or new mutation endpoint is enabled;
+- tests added for static eligibility, unknown action, domain health, confidence/risk/reversibility, manual review, collision detection and non-actionable findings;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 012 — Optimization compatibility/conflict layer: applicability, conflicts, dependencies and action-readiness gates before Transaction Engine.
+Increment 013 — Transaction Engine foundation: allowlisted ActionDefinition registry, prepare/BeforeState, one-time consent contract, journal and VERIFY interfaces. Execution remains restricted until the foundation passes its safety tests.
 
 ## Later order
-1. Complete formal Optimization Engine.
-2. Transaction Engine.
-3. Safe action catalog.
-4. Drivers and updates.
-5. Repair Center.
-6. Gaming and streaming optimization.
-7. Premium UI.
-8. PC Experience.
-9. Packaging and release.
+1. Transaction Engine.
+2. Safe action catalog.
+3. Drivers and updates.
+4. Repair Center.
+5. Gaming and streaming optimization.
+6. Premium UI.
+7. PC Experience.
+8. Packaging and release.
 
 ## Rule
 One coherent increment at a time. Do not advance while CI is broken.
