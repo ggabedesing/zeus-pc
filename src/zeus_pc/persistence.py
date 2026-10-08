@@ -301,6 +301,34 @@ class ZeusDatabase:
             )
             return cursor.rowcount == 1
 
+    def consume_transaction_consent(
+        self,
+        transaction_id: str,
+        *,
+        expected_hash: str,
+        updated_at: str,
+    ) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE transaction_journal
+                SET state = 'CONSENTED',
+                    updated_at = ?,
+                    consent_consumed_at = ?,
+                    consent_hash = NULL
+                WHERE transaction_id = ?
+                  AND state = 'PREPARED'
+                  AND consent_hash = ?
+                """,
+                (
+                    updated_at,
+                    updated_at,
+                    transaction_id,
+                    expected_hash,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def get_transaction(
         self,
         transaction_id: str,
