@@ -12,24 +12,24 @@ Updated: 2026-10-07
 - Versioned application configuration with persisted profile/history preferences.
 - Bounded structured JSONL application logging.
 - Read-only inventory for services, scheduled tasks and processes.
+- Read-only inventory for TPM, Firewall profiles, proxy and network link state.
 
 ## Current increment
-Increment 006 — Platform and security inventory.
+Increment 007 — Storage health, TRIM and Windows event summaries.
 
 Status:
-- branch: auto/platform-security-inventory;
-- TPM inventory added;
-- Windows Firewall profile inventory added;
-- current-user proxy inventory added;
-- network link/adapter inventory added;
-- access denied is surfaced as REQUIRES_ELEVATION;
-- identifiable missing cmdlets are surfaced as UNSUPPORTED;
-- no security or network mutation is enabled;
-- tests added for TPM, firewall, proxy, link counts and error classification;
+- branch: auto/storage-health-events;
+- physical disk health inventory added;
+- storage reliability counters queried when Windows exposes them;
+- unavailable reliability counters remain PARTIAL instead of being guessed;
+- NTFS/ReFS TRIM state is read through fsutil without mutation;
+- bounded 24-hour Critical/Error event summary added for System/Application logs;
+- full event messages are intentionally excluded from history;
+- tests added for disk health, reliability availability, TRIM parsing, event aggregation and elevation handling;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 007 — Storage health/reliability/TRIM and Windows event summaries.
+Increment 008 — Installed software inventory and Windows virtualization/feature context.
 
 ## Later order
 1. Complete deep inventory.
