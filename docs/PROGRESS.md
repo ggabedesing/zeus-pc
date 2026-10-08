@@ -53,3 +53,5 @@ Increment 014 — Transaction execution lifecycle for SET_ACTIVE_POWER_PLAN only
 
 ## Rule
 One coherent increment at a time. Do not advance while CI is broken.
+
+Increment 014 implementation is under review; Windows CI is required before merge.
