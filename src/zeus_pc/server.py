@@ -12,7 +12,7 @@ from .actions import list_power_plans, set_power_plan
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
-from .observer import collect_sample
+from .observer import OBSERVER
 from .persistence import ZeusDatabase
 from .probes import collect_all
 
@@ -54,6 +54,11 @@ def run_scan(profile: str, database: ZeusDatabase = DB, app_log: StructuredLog =
         "profile": profile.upper(),
         "recommendations": recommendation_payload,
     }
+
+
+def _parse_limit(query: dict[str, list[str]], default: int) -> int:
+    raw = query.get("limit", [str(default)])[0]
+    return int(raw)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -99,6 +104,10 @@ class Handler(BaseHTTPRequestHandler):
                     "schema_version": CONFIG_SCHEMA_VERSION,
                     "selected_profile": config.selected_profile,
                 },
+                "observer": {
+                    "enabled": config.observer_enabled,
+                    "buffer_capacity": OBSERVER.max_samples,
+                },
             })
         if path == "/api/config":
             return self.send_json({"config": config.to_dict()})
@@ -108,14 +117,31 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(run_scan(profile))
         if path == "/api/history":
             query = parse_qs(parsed.query)
-            limit_raw = query.get("limit", [str(config.history_limit)])[0]
             try:
-                limit = int(limit_raw)
+                limit = _parse_limit(query, config.history_limit)
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({"scans": DB.recent_scans(limit)})
         if path == "/api/observer/sample":
-            return self.send_json(collect_sample().to_dict())
+            if not config.observer_enabled:
+                return self.send_json({"error": "Observer desativado."}, 409)
+            return self.send_json(OBSERVER.record().to_dict())
+        if path == "/api/observer/history":
+            query = parse_qs(parsed.query)
+            try:
+                limit = _parse_limit(query, 60)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            return self.send_json({
+                "samples": [item.to_dict() for item in OBSERVER.recent(limit)]
+            })
+        if path == "/api/observer/baseline":
+            query = parse_qs(parsed.query)
+            try:
+                limit = _parse_limit(query, 60)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            return self.send_json(OBSERVER.baseline(limit))
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
