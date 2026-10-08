@@ -6,12 +6,23 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from collections import deque
 from dataclasses import asdict, dataclass
 from functools import lru_cache
 from typing import Any, Callable
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+SESSION_MODES = {
+    "AUTO",
+    "GENERAL",
+    "GAMING",
+    "STREAMING",
+    "GAMING_STREAMING",
+    "WORK",
+    "EDITING",
+    "PROGRAMMING",
+}
 
 
 @dataclass(slots=True)
@@ -21,6 +32,19 @@ class Sample:
     ram_used_pct: float | None
     gpu_pct: float | None
     gpu_temp_c: float | None
+    session_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class ObserverSession:
+    id: str
+    label: str
+    mode: str
+    started_at: float
+    ended_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -67,6 +91,22 @@ def _cpu_usage_from_times(
 
     busy = 1.0 - (idle_delta / total_delta)
     return round(min(max(busy * 100.0, 0.0), 100.0), 1)
+
+
+def adaptive_interval_seconds(sample: Sample) -> float:
+    utilization = [
+        value
+        for value in (sample.cpu_pct, sample.gpu_pct)
+        if value is not None
+    ]
+    if not utilization:
+        return 2.0
+    peak = max(utilization)
+    if peak >= 60.0:
+        return 1.0
+    if peak >= 25.0:
+        return 2.0
+    return 5.0
 
 
 class NativeWindowsSampler:
@@ -192,13 +232,26 @@ class ObserverStore:
             self._samples.append(value)
         return value
 
-    def recent(self, limit: int = 60) -> list[Sample]:
+    def recent(
+        self,
+        limit: int = 60,
+        session_id: str | None = None,
+    ) -> list[Sample]:
         safe_limit = min(max(int(limit), 1), self.max_samples)
         with self._lock:
-            return list(self._samples)[-safe_limit:]
+            samples = list(self._samples)
+        if session_id:
+            samples = [
+                item for item in samples if item.session_id == session_id
+            ]
+        return samples[-safe_limit:]
 
-    def baseline(self, limit: int = 60) -> dict[str, Any]:
-        samples = self.recent(limit)
+    def baseline(
+        self,
+        limit: int = 60,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        samples = self.recent(limit, session_id=session_id)
         metrics = {
             "cpu_pct": [item.cpu_pct for item in samples if item.cpu_pct is not None],
             "ram_used_pct": [
@@ -231,10 +284,147 @@ class ObserverStore:
             duration = max(samples[-1].timestamp - samples[0].timestamp, 0.0)
 
         return {
+            "session_id": session_id,
             "sample_count": len(samples),
             "duration_seconds": round(duration, 3),
             "metrics": summaries,
         }
 
 
+class ObserverRunner:
+    def __init__(
+        self,
+        store: ObserverStore,
+        provider: Callable[[], Sample] = collect_sample,
+        session_history: int = 20,
+    ) -> None:
+        self.store = store
+        self._provider = provider
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+        self._current_interval = 2.0
+        self._last_sample_time: float | None = None
+        self._active_session: ObserverSession | None = None
+        self._sessions: deque[ObserverSession] = deque(
+            maxlen=max(int(session_history), 1)
+        )
+
+    def is_running(self) -> bool:
+        thread = self._thread
+        return bool(thread and thread.is_alive())
+
+    def start(self) -> bool:
+        with self._lock:
+            if self.is_running():
+                return False
+            self._stop_event.clear()
+            self._thread = threading.Thread(
+                target=self._run,
+                name="ZeusObserver",
+                daemon=True,
+            )
+            self._thread.start()
+            return True
+
+    def stop(self, timeout: float = 3.0) -> bool:
+        with self._lock:
+            thread = self._thread
+            if not thread or not thread.is_alive():
+                self._close_session_locked()
+                return False
+            self._stop_event.set()
+
+        thread.join(timeout=max(float(timeout), 0.0))
+
+        with self._lock:
+            stopped = not thread.is_alive()
+            if stopped:
+                self._thread = None
+                self._close_session_locked()
+            return stopped
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            sample = self.sample_once()
+            interval = adaptive_interval_seconds(sample)
+            with self._lock:
+                self._current_interval = interval
+            if self._stop_event.wait(interval):
+                break
+
+    def sample_once(self) -> Sample:
+        sample = self._provider()
+        with self._lock:
+            if self._active_session is not None:
+                sample.session_id = self._active_session.id
+            self._last_sample_time = sample.timestamp
+        self.store.record(sample)
+        return sample
+
+    def start_session(
+        self,
+        label: str = "",
+        mode: str = "AUTO",
+    ) -> tuple[ObserverSession, bool]:
+        normalized_mode = str(mode or "AUTO").upper().strip()
+        if normalized_mode not in SESSION_MODES:
+            normalized_mode = "AUTO"
+        normalized_label = str(label or "").strip()[:80]
+        if not normalized_label:
+            normalized_label = normalized_mode.replace("_", " ").title()
+
+        with self._lock:
+            if self._active_session is not None:
+                return self._active_session, False
+            session = ObserverSession(
+                id=str(uuid.uuid4()),
+                label=normalized_label,
+                mode=normalized_mode,
+                started_at=time.time(),
+            )
+            self._active_session = session
+            return session, True
+
+    def stop_session(self) -> ObserverSession | None:
+        with self._lock:
+            return self._close_session_locked()
+
+    def _close_session_locked(self) -> ObserverSession | None:
+        session = self._active_session
+        if session is None:
+            return None
+        if session.ended_at is None:
+            session.ended_at = time.time()
+        self._sessions.append(session)
+        self._active_session = None
+        return session
+
+    def recent_sessions(self, limit: int = 10) -> list[ObserverSession]:
+        safe_limit = min(max(int(limit), 1), self._sessions.maxlen or 20)
+        with self._lock:
+            return list(self._sessions)[-safe_limit:]
+
+    def status(self) -> dict[str, Any]:
+        with self._lock:
+            active = (
+                self._active_session.to_dict()
+                if self._active_session is not None
+                else None
+            )
+            last_session = (
+                self._sessions[-1].to_dict()
+                if self._sessions
+                else None
+            )
+            return {
+                "running": self.is_running(),
+                "current_interval_seconds": self._current_interval,
+                "last_sample_time": self._last_sample_time,
+                "active_session": active,
+                "last_session": last_session,
+            }
+
+
 OBSERVER = ObserverStore()
+OBSERVER_RUNNER = ObserverRunner(OBSERVER)
