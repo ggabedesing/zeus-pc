@@ -9,30 +9,30 @@ Updated: 2026-10-07
 - Contextual Rule Engine with explicit profiles.
 - SQLite persistence with schema versioning, settings and scan history.
 - Real scan history integration with scan_id and /api/history.
+- Versioned application configuration with persisted profile/history preferences.
+- Bounded structured JSONL application logging.
 
 ## Current increment
-Increment 004 — Versioned application configuration and structured logging.
+Increment 005 — Deep inventory: services, scheduled tasks and processes.
 
 Status:
-- branch: auto/config-logging-foundation;
-- config schema version 1 implemented;
-- selected profile, history limit and observer preference persisted;
-- safe normalization and partial updates implemented;
-- GET/POST /api/config integrated;
-- scans use persisted profile when none is supplied;
-- history uses persisted limit when none is supplied;
-- bounded JSONL structured app logging implemented;
-- startup, shutdown, scan, config update and request failure events integrated;
-- runtime data/logs ignored by Git;
-- unit and integration tests added;
-- waiting for CI validation before merge.
+- branch: auto/deep-inventory-services-tasks-processes;
+- Win32_Service inventory added;
+- scheduled task inventory added;
+- Win32_Process inventory added;
+- service running/automatic counts added;
+- scheduled task disabled count added;
+- process working-set aggregation and top-memory list added;
+- all three domains remain read-only;
+- tests added for counts, aggregation, ordering and explicit failure state;
+- waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 005 — Deep inventory expansion, starting with services/tasks/processes in read-only mode.
+Increment 006 — Security and platform inventory: TPM, firewall profiles, proxy and network link details.
 
 ## Later order
-1. Deep inventory.
-2. Faster Observer.
+1. Complete deep inventory and storage reliability.
+2. Faster Observer and session baselines.
 3. Formal Optimization Engine.
 4. Transaction Engine.
 5. Safe action catalog.

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .inventory import processes_probe, scheduled_tasks_probe, services_probe
 from .models import Metric, ProbeResult, Status
 from .powershell import run, run_json
 
@@ -326,7 +327,7 @@ def integrity_probe() -> ProbeResult:
         return ProbeResult("Integrity", Status.PARTIAL, message=str(exc), source="servicing state")
 
 def collect_all() -> list[ProbeResult]:
-    probes = [windows_probe, cpu_probe, ram_probe, gpu_probe, storage_probe, motherboard_probe, bios_probe, power_probe, secure_boot_probe, security_probe, startup_probe, update_probe, drivers_probe, devices_probe, network_probe, integrity_probe]
+    probes = [windows_probe, cpu_probe, ram_probe, gpu_probe, storage_probe, motherboard_probe, bios_probe, power_probe, secure_boot_probe, security_probe, startup_probe, update_probe, drivers_probe, devices_probe, network_probe, services_probe, scheduled_tasks_probe, processes_probe, integrity_probe]
     results: list[ProbeResult] = []
     for probe in probes:
         try:
