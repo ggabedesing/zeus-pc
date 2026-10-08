@@ -356,17 +356,29 @@ class ProcessObserverStore:
             self._items.append(snapshot)
         return snapshot
 
-    def latest(self) -> ProcessSnapshot | None:
-        with self._lock:
-            return self._items[-1] if self._items else None
+    def latest(
+        self,
+        session_id: str | None = None,
+    ) -> ProcessSnapshot | None:
+        items = self.recent(self.max_snapshots, session_id=session_id)
+        return items[-1] if items else None
 
-    def recent(self, limit: int = 10) -> list[ProcessSnapshot]:
+    def recent(
+        self,
+        limit: int = 10,
+        session_id: str | None = None,
+    ) -> list[ProcessSnapshot]:
         safe_limit = min(
             max(int(limit), 1),
             self.max_snapshots,
         )
         with self._lock:
-            return list(self._items)[-safe_limit:]
+            items = list(self._items)
+        if session_id:
+            items = [
+                item for item in items if item.session_id == session_id
+            ]
+        return items[-safe_limit:]
 
 
 _PROCESS_SAMPLER = NativeProcessSampler()
