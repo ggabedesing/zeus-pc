@@ -11,27 +11,28 @@ Updated: 2026-10-07
 - Real scan history integration with scan_id and /api/history.
 - Versioned application configuration with persisted profile/history preferences.
 - Bounded structured JSONL application logging.
+- Read-only inventory for services, scheduled tasks and processes.
 
 ## Current increment
-Increment 005 — Deep inventory: services, scheduled tasks and processes.
+Increment 006 — Platform and security inventory.
 
 Status:
-- branch: auto/deep-inventory-services-tasks-processes;
-- Win32_Service inventory added;
-- scheduled task inventory added;
-- Win32_Process inventory added;
-- service running/automatic counts added;
-- scheduled task disabled count added;
-- process working-set aggregation and top-memory list added;
-- all three domains remain read-only;
-- tests added for counts, aggregation, ordering and explicit failure state;
+- branch: auto/platform-security-inventory;
+- TPM inventory added;
+- Windows Firewall profile inventory added;
+- current-user proxy inventory added;
+- network link/adapter inventory added;
+- access denied is surfaced as REQUIRES_ELEVATION;
+- identifiable missing cmdlets are surfaced as UNSUPPORTED;
+- no security or network mutation is enabled;
+- tests added for TPM, firewall, proxy, link counts and error classification;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 006 — Security and platform inventory: TPM, firewall profiles, proxy and network link details.
+Increment 007 — Storage health/reliability/TRIM and Windows event summaries.
 
 ## Later order
-1. Complete deep inventory and storage reliability.
+1. Complete deep inventory.
 2. Faster Observer and session baselines.
 3. Formal Optimization Engine.
 4. Transaction Engine.
