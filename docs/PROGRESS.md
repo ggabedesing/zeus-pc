@@ -11,40 +11,38 @@ Updated: 2026-10-08
 - Real scan history integration with scan_id and /api/history.
 - Versioned application configuration with persisted profile/history preferences.
 - Bounded structured JSONL application logging.
-- Read-only inventory for services, scheduled tasks and processes.
-- Read-only inventory for TPM, Firewall profiles, proxy and network link state.
-- Read-only storage health, reliability, TRIM and bounded Windows event summaries.
-- Installed software inventory plus virtualization, hypervisor, SLAT, VBS and Windows optional-feature context.
-- Native CPU/RAM Observer sampling, bounded ring buffer, history and baseline APIs.
-- Background Observer runner, adaptive cadence and explicit session lifecycle.
-- Native bounded process CPU/memory context linked to Observer sessions.
-- Formal dry-run Optimization Engine with typed findings, evidence, confidence and Observer interpretation.
+- Read-only deep inventory for Windows hardware, services, tasks, processes, security, network, storage, events, software and virtualization.
+- Native CPU/RAM Observer sampling, bounded history/baselines, background runner, sessions and process-level context.
+- Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
-Increment 012 — Optimization compatibility and conflict gates.
+Increment 013 — Transaction Engine foundation.
 
 Status:
-- branch: auto/optimization-compatibility-gates;
-- semantic action policy registry added;
-- SET_ACTIVE_POWER_PLAN policy declares required Windows/Power domains, profile compatibility, risk, confidence, reversibility and security-preserving requirements;
-- unknown action IDs are blocked;
-- required diagnostic domains must be present and Status.OK;
-- APPLY_RECOMMENDED is required before static eligibility;
-- HIGH confidence, allowed risk and reversibility are enforced by policy;
-- security-category actions require an explicitly security-preserving action policy;
-- distinct findings sharing the same semantic action_id create ACTION_COLLISION conflicts;
-- findings receive NON_ACTIONABLE, MANUAL_REVIEW, STATIC_ELIGIBLE or BLOCKED readiness state;
-- STATIC_ELIGIBLE still remains non-executable with TRANSACTION_ENGINE_NOT_AVAILABLE;
-- OptimizationPlan summary now includes compatibility/readiness/conflict report;
-- no execution or new mutation endpoint is enabled;
-- tests added for static eligibility, unknown action, domain health, confidence/risk/reversibility, manual review, collision detection and non-actionable findings;
+- branch: auto/transaction-foundation;
+- SQLite schema upgraded from v1 to v2 with non-destructive transaction_journal;
+- transaction journal stores semantic action, state, normalized args, BeforeState, verify/rollback payloads, expiry and errors;
+- consent plaintext is never persisted; only SHA-256 is stored;
+- atomic one-time consent consumption added;
+- transaction states formalized from PREPARED through VERIFIED/ROLLBACK/FAILED/EXPIRED;
+- semantic ActionDefinition and ActionRegistry added;
+- initial SET_ACTIVE_POWER_PLAN definition validates exact GUID and existing plan;
+- power-plan BeforeState captures active GUID/name;
+- independent power-plan VERIFY and rollback-preview interfaces added;
+- TransactionEngine.prepare creates journaled PREPARED transaction and short-lived consent token;
+- consume_consent validates state, expiry and token with constant-time comparison, then atomically consumes it;
+- consent does not execute an action in this increment;
+- GET /api/transactions, POST /api/transactions/prepare and POST /api/transactions/consent added;
+- legacy direct POST /api/actions/power-plan is now blocked with HTTP 409;
+- /api/status reports no enabled mutations and lists preparable semantic actions;
+- tests added for prepare/BeforeState/journal, one-time consent, bad/expired tokens, unknown actions, strict args, VERIFY interface and schema v1→v2 data preservation;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 013 — Transaction Engine foundation: allowlisted ActionDefinition registry, prepare/BeforeState, one-time consent contract, journal and VERIFY interfaces. Execution remains restricted until the foundation passes its safety tests.
+Increment 014 — Transaction execution lifecycle for SET_ACTIVE_POWER_PLAN only: resource lock, APPLY, independent VERIFY, journal transitions and automatic rollback on failed verify.
 
 ## Later order
-1. Transaction Engine.
+1. Complete Transaction Engine execution/rollback/crash recovery.
 2. Safe action catalog.
 3. Drivers and updates.
 4. Repair Center.
