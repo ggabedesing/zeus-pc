@@ -14,6 +14,7 @@ from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
 from .observer import OBSERVER, OBSERVER_RUNNER
 from .persistence import ZeusDatabase
+from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -162,6 +163,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(
                 OBSERVER.baseline(limit, session_id=session_id)
             )
+        if path == "/api/observer/processes":
+            try:
+                limit = _parse_limit(query, 5)
+            except ValueError:
+                return self.send_json({"error": "limit invalido."}, 400)
+            session_id = query.get("session_id", [None])[0]
+            latest = PROCESS_OBSERVER.latest(session_id=session_id)
+            if latest is None and config.observer_enabled:
+                latest = OBSERVER_RUNNER.collect_process_context(force=True)
+                if latest is not None and session_id and latest.session_id != session_id:
+                    latest = PROCESS_OBSERVER.latest(session_id=session_id)
+            return self.send_json({
+                "latest": latest.to_dict() if latest is not None else None,
+                "snapshots": [
+                    item.to_dict()
+                    for item in PROCESS_OBSERVER.recent(
+                        limit,
+                        session_id=session_id,
+                    )
+                ],
+            })
         if path == "/api/observer/sessions":
             try:
                 limit = _parse_limit(query, 10)
