@@ -16,41 +16,41 @@ Updated: 2026-10-08
 - Read-only storage health, reliability, TRIM and bounded Windows event summaries.
 - Installed software inventory plus virtualization, hypervisor, SLAT, VBS and Windows optional-feature context.
 - Native CPU/RAM Observer sampling, bounded ring buffer, history and baseline APIs.
+- Background Observer runner, adaptive cadence and explicit session lifecycle.
 
 ## Current increment
-Increment 010A — Background Observer runner and explicit sessions.
+Increment 010B — Native process performance context.
 
 Status:
-- branch: auto/observer-background-sessions;
-- daemon background sampler added;
-- observer_enabled now controls background sampling lifecycle;
-- adaptive cadence implemented: 1s high load, 2s moderate/unknown, 5s light load;
-- one active session at a time with UUID, label, mode, start/end timestamps;
-- active session id is attached to samples;
-- duplicate session start preserves the current session instead of destroying evidence;
-- session-filtered history/baseline supported;
-- /api/observer/status and /api/observer/sessions added;
-- POST session start/stop endpoints added;
-- server startup/config/shutdown synchronize Observer runner state;
-- structured logs record observer/session lifecycle;
-- no process priority, affinity, power, network or scheduler mutation is enabled;
-- tests added for cadence policy, session lifecycle/tagging and runner start/stop;
+- branch: auto/observer-process-context;
+- native Toolhelp32 process enumeration added;
+- GetProcessTimes deltas provide per-process CPU share without PowerShell;
+- PID reuse is guarded by process creation time;
+- K32/PSAPI working-set memory is collected when access is available;
+- CPU timing can still be collected when process memory access is denied;
+- protected/inaccessible processes are counted explicitly instead of reported as zero;
+- process context is sampled at a slower 15-second cadence;
+- only bounded top CPU/top memory records are retained;
+- process snapshot history is bounded and session-filterable;
+- process snapshots inherit active observer session_id;
+- GET /api/observer/processes added;
+- no command lines, process contents, priority, affinity or termination actions are collected/enabled;
+- tests added for CPU delta math, PID reuse, top-N ordering, bounded history and session tagging;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 010B — Bounded process-level performance context at a slower cadence.
+Increment 011 — Formal Optimization Engine: typed findings and dry-run optimization plans consuming inventory plus Observer evidence.
 
 ## Later order
-1. Complete Observer process/session evidence.
-2. Formal Optimization Engine.
-3. Transaction Engine.
-4. Safe action catalog.
-5. Drivers and updates.
-6. Repair Center.
-7. Gaming and streaming optimization.
-8. Premium UI.
-9. PC Experience.
-10. Packaging and release.
+1. Formal Optimization Engine.
+2. Transaction Engine.
+3. Safe action catalog.
+4. Drivers and updates.
+5. Repair Center.
+6. Gaming and streaming optimization.
+7. Premium UI.
+8. PC Experience.
+9. Packaging and release.
 
 ## Rule
 One coherent increment at a time. Do not advance while CI is broken.
