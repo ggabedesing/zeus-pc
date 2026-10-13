@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from typing import Any
 
-from .models import Metric, ProbeResult, Status
+from .models import Metric, ProbeResult, Status, humanize_probe_error
 from .powershell import run, run_json
 
 
@@ -26,32 +26,6 @@ def _blocked(domain: str) -> ProbeResult | None:
             message="Disponivel apenas no Windows.",
         )
     return None
-
-
-def _error_status(exc: Exception | str) -> Status:
-    text = str(exc).lower()
-    if any(
-        token in text
-        for token in (
-            "access is denied",
-            "acesso negado",
-            "requires elevation",
-            "administrator",
-            "administrador",
-        )
-    ):
-        return Status.REQUIRES_ELEVATION
-    if any(
-        token in text
-        for token in (
-            "is not recognized",
-            "não é reconhecido",
-            "nao e reconhecido",
-            "commandnotfound",
-        )
-    ):
-        return Status.UNSUPPORTED
-    return Status.FAILED
 
 
 def physical_storage_probe() -> ProbeResult:
@@ -84,10 +58,11 @@ def physical_storage_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source)
         return ProbeResult(
             "Physical Storage",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
 
@@ -141,10 +116,11 @@ def storage_reliability_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source)
         return ProbeResult(
             "Storage Reliability",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
 
@@ -187,10 +163,11 @@ def trim_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, "fsutil")
         return ProbeResult(
             "TRIM",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
 
@@ -234,9 +211,10 @@ def windows_event_summary_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source)
         return ProbeResult(
             "Windows Events",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
