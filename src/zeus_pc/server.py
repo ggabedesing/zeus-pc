@@ -17,7 +17,7 @@ from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
-from .transaction import TransactionEngine
+from .transaction import TransactionEngine, TransactionError, TransactionState
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
@@ -115,8 +115,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
-                "execution_mode": "TransactionFoundation",
-                "enabled_actions": [],
+                "execution_mode": "TransactionExecution",
+                "enabled_actions": TRANSACTIONS.registry.executable_ids(),
                 "preparable_actions": TRANSACTIONS.registry.ids(),
                 "host": HOST,
                 "persistence": {
@@ -252,7 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({
                 "transactions": TRANSACTIONS.recent(limit),
-                "execution_enabled": False,
+                "execution_enabled": True,
             })
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
@@ -353,13 +353,39 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return self.send_json({"transaction": transaction})
 
+            if path == "/api/transactions/execute":
+                transaction_id = str(payload.get("transaction_id") or "")
+                try:
+                    executed = TRANSACTIONS.execute(transaction_id)
+                except TransactionError as exc:
+                    APP_LOG.write(
+                        "transaction_execution_rejected",
+                        level="WARN",
+                        transaction_id=transaction_id,
+                        reason=str(exc),
+                    )
+                    return self.send_json({"ok": False, "message": str(exc)}, 409)
+                verified = executed["state"] == TransactionState.VERIFIED.value
+                APP_LOG.write(
+                    "transaction_executed" if verified else "transaction_execution_failed",
+                    level="INFO" if verified else "WARN",
+                    transaction_id=executed["transaction_id"],
+                    action_id=executed["action_id"],
+                    state=executed["state"],
+                )
+                return self.send_json(
+                    {"transaction": executed, "ok": verified},
+                    200 if verified else 409,
+                )
+
             if path == "/api/actions/power-plan":
                 return self.send_json(
                     {
                         "ok": False,
                         "message": (
                             "Execucao direta desativada. "
-                            "Acoes reais exigirao o Transaction Engine completo."
+                            "Use /api/transactions/prepare, /api/transactions/consent "
+                            "e /api/transactions/execute."
                         ),
                     },
                     409,
