@@ -18,20 +18,30 @@ class ActionResult:
     message: str
 
 
+def decode_console_output(raw: bytes) -> str:
+    if not raw:
+        return ""
+    for encoding in ("oem", "utf-8"):
+        try:
+            return raw.decode(encoding, errors="replace")
+        except LookupError:
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
 def list_power_plans() -> list[dict[str, str | bool]]:
     if os.name != "nt":
         return []
     proc = subprocess.run(
         ["powercfg", "/list"],
         capture_output=True,
-        text=True,
         timeout=4,
         creationflags=CREATE_NO_WINDOW,
     )
     if proc.returncode != 0:
         return []
     plans: list[dict[str, str | bool]] = []
-    for line in proc.stdout.splitlines():
+    for line in decode_console_output(proc.stdout).splitlines():
         match = re.search(
             r"([0-9a-fA-F-]{36})\s*\((.*?)\)\s*(\*)?",
             line,
@@ -55,15 +65,14 @@ def apply_power_plan(guid: str) -> ActionResult:
     proc = subprocess.run(
         ["powercfg", "/setactive", normalized],
         capture_output=True,
-        text=True,
         timeout=4,
         creationflags=CREATE_NO_WINDOW,
     )
     if proc.returncode != 0:
         return ActionResult(
             False,
-            proc.stderr.strip()
-            or proc.stdout.strip()
+            decode_console_output(proc.stderr).strip()
+            or decode_console_output(proc.stdout).strip()
             or "Falha ao alterar o plano de energia.",
         )
     return ActionResult(
