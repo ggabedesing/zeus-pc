@@ -189,6 +189,30 @@ class ZeusDatabase:
             for row in rows
         ]
 
+    def get_scan(self, scan_id: int) -> dict[str, Any] | None:
+        try:
+            safe_id = int(scan_id)
+        except (TypeError, ValueError):
+            return None
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, created_at, profile, snapshot_json, recommendations_json
+                FROM scan_history
+                WHERE id = ?
+                """,
+                (safe_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "profile": row["profile"],
+            "snapshot": json.loads(row["snapshot_json"]),
+            "recommendations": json.loads(row["recommendations_json"]),
+        }
+
     def record_transaction(
         self,
         *,

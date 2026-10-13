@@ -17,6 +17,7 @@ from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
+from .report import build_report_html
 from .transaction import TransactionEngine, TransactionError, TransactionState
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -144,6 +145,30 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({"scans": DB.recent_scans(limit)})
+        if path.startswith("/api/scan/") and path[len("/api/scan/"):].isdigit():
+            scan = DB.get_scan(int(path[len("/api/scan/"):]))
+            if scan is None:
+                return self.send_json({"error": "Analise nao encontrada."}, 404)
+            return self.send_json(scan)
+        if path == "/api/report":
+            scan_id = query.get("scan_id", [None])[0]
+            if scan_id is None:
+                history = DB.recent_scans(1)
+                scan = history[0] if history else None
+            else:
+                scan = DB.get_scan(scan_id)
+            if scan is None:
+                return self.send_json({"error": "Nenhuma analise encontrada para gerar o relatorio."}, 404)
+            body = build_report_html(scan, version=__version__, build=BUILD).encode("utf-8")
+            filename = f"zeus-pc-relatorio-{scan.get('id', 'atual')}.html"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", f"attachment; filename={filename}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/api/optimization/plan":
             history = DB.recent_scans(1)
             if not history:
