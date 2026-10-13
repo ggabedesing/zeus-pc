@@ -14,6 +14,9 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Servidor ligado somente em `127.0.0.1`.
 - Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows, executada somente pelo Transaction Engine (preparar → consentimento único → executar → verificar por leitura independente → rollback automático se a verificação falhar).
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
+- Cada domínio declara o estado real da leitura: `OK` só quando há valor utilizável, `REQUIRES_ELEVATION`, `UNSUPPORTED`, `PARTIAL` ou `NOT_CHECKED` quando não há. Uma sonda que não leu nada não afirma que está tudo bem.
+- Inventários que exigem administrador foram trocados por fontes CIM legíveis em sessão comum, caso do Windows Features via `Win32_OptionalFeature`.
+- O painel **Energia** da interface conduz o fluxo completo: preparar, consentir com validade e confirmação explícita, executar e ler o resultado real do diário de transações.
 
 ## Como instalar no PC
 

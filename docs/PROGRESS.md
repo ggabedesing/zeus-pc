@@ -40,6 +40,27 @@ Status:
 - validated locally on real Windows hardware: prepare, consent, execute and idempotent replay ended VERIFIED with persisted apply and verify evidence;
 - waiting for Windows CI validation before merge.
 
+## Real-machine hardening (014B)
+Status: complete on branch `auto/transaction-power-execution`.
+
+- probe failures now go through `humanize_probe_error`, so messages are
+  operator-facing and never leak PowerShell argv or engine text;
+- `demote_if_unknown` stops probes that read nothing from claiming OK;
+- Windows Features reads `Win32_OptionalFeature` through CIM and works without
+  elevation, replacing the previous FAILED domain;
+- Windows Update timeout raised to 25s and its failure path made clean;
+- PowerShell output forced to UTF-8 and `powercfg` output decoded as OEM, so
+  accented plan names such as `Desempenho Máximo` survive into the UI and the
+  journal;
+- the Energia panel in the web UI now drives the full transaction flow:
+  prepare, consent card with countdown and acknowledgement gate, execute, then
+  honest VERIFIED / ROLLED_BACK / FAILED reporting plus the journal table;
+- real unelevated scan: 25 domains OK, Secure Boot REQUIRES_ELEVATION, TPM and
+  Storage Reliability PARTIAL, Integrity NOT_CHECKED, zero FAILED;
+- a cancelled UI prepare stayed PREPARED with no consent consumed and no system
+  change; the active plan remained `e3614da8` throughout;
+- details in `docs/increments/014b-real-machine-hardening.md`.
+
 ## Next increment
 Increment 015 — Transaction crash recovery, host-origin request hardening and durable resource ownership before expanding the safe action catalog.
 
