@@ -1,8 +1,13 @@
 const $ = (id) => document.getElementById(id);
 
 let lastScan = null;
-let observerTimer = null;
-const series = { cpu: [], gpu: [], ram: [] };
+let sampleTimer = null;
+let processTimer = null;
+let sampleIntervalMs = 1000;
+let lastProcessSnapshot = null;
+let shownHistoryId = null;
+const series = { cpu: [], gpu: [], ram: [], temp: [] };
+const SERIES_MAX = 90;
 
 let powerPlans = [];
 let powerTxCache = [];
@@ -10,10 +15,30 @@ let powerPending = null;
 let powerBusy = false;
 let powerCountdownTimer = null;
 
+const STATUS_META = {
+  OK: { label: "OK", cls: "ok" },
+  PARTIAL: { label: "Parcial", cls: "warn" },
+  REQUIRES_ELEVATION: { label: "Requer admin", cls: "muted" },
+  UNSUPPORTED: { label: "Indisponível", cls: "muted" },
+  NOT_CHECKED: { label: "Não verificado", cls: "muted" },
+  FAILED: { label: "Falhou", cls: "bad" },
+};
+
+const CHART_COLORS = { cpu: "#7dff8d", gpu: "#61d6ff", ram: "#b18cff", temp: "#ffd86b" };
+
 function escapeHtml(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char];
   });
+}
+
+function statusMeta(status) {
+  return STATUS_META[status] || { label: status || "—", cls: "muted" };
+}
+
+function statusPill(status) {
+  const meta = statusMeta(status);
+  return "<span class='state-pill " + meta.cls + "'>" + escapeHtml(meta.label) + "</span>";
 }
 
 function toast(message) {
@@ -29,6 +54,7 @@ function go(page) {
     el.classList.toggle("active", el.dataset.page === page);
   });
   $("page-" + page).classList.add("active");
+  if (page === "history" && !$("historyList").dataset.loaded) loadHistoryList();
 }
 
 document.querySelectorAll(".nav-item").forEach(function (button) {
@@ -49,17 +75,28 @@ function metric(domain, name) {
 
 function setBar(id, value, max) {
   max = max || 100;
+  const el = $(id);
+  if (!el) return;
   const numeric = Number(value || 0);
   const pct = Math.max(0, Math.min(100, numeric / max * 100));
-  $(id).style.width = pct + "%";
+  el.style.width = pct + "%";
+}
+
+function formatBytes(value) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "—";
+  if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+  if (bytes >= 1024 * 1024) return Math.round(bytes / (1024 * 1024)) + " MB";
+  return Math.round(bytes / 1024) + " KB";
 }
 
 function recommendationNode(item) {
   const div = document.createElement("div");
+  const cls = item.status === "RECOMMENDED" ? "bad" : item.status === "BLOCKED" ? "warn" : "ok";
   div.className = "recommendation";
   div.innerHTML =
     "<div><h4>" + escapeHtml(item.title) + "</h4><p>" + escapeHtml(item.reason) +
-    "</p></div><span class='tag'>" + escapeHtml(item.status) + "</span>";
+    "</p></div><span class='state-pill " + cls + "'>" + escapeHtml(item.status) + "</span>";
   return div;
 }
 
@@ -70,12 +107,92 @@ function renderRecommendations() {
   home.innerHTML = "";
   full.innerHTML = "";
 
-  list.slice(0, 2).forEach(function (item) { home.appendChild(recommendationNode(item)); });
-  list.forEach(function (item) { full.appendChild(recommendationNode(item)); });
+  if (!list.length) {
+    home.className = "recommendation-list empty-state";
+    home.textContent = "Nenhuma recomendação nesta análise.";
+  } else {
+    home.className = "recommendation-list";
+    list.slice(0, 3).forEach(function (item) { home.appendChild(recommendationNode(item)); });
+  }
+  if (!list.length) {
+    full.className = "recommendation-list empty-state";
+    full.textContent = "Nenhuma recomendação nesta análise.";
+  } else {
+    full.className = "recommendation-list";
+    list.forEach(function (item) { full.appendChild(recommendationNode(item)); });
+  }
 
   $("recommendationCount").textContent = list.filter(function (x) { return x.status === "RECOMMENDED"; }).length;
   $("blockedCount").textContent = list.filter(function (x) { return x.status === "BLOCKED"; }).length;
   $("okCount").textContent = list.filter(function (x) { return x.status === "ALREADY_CORRECT"; }).length;
+}
+
+function domainCounts(snapshot) {
+  const counts = { ok: 0, warn: 0, muted: 0, bad: 0 };
+  (snapshot || []).forEach(function (item) {
+    const meta = statusMeta(item.status);
+    counts[meta.cls] += 1;
+  });
+  return counts;
+}
+
+function renderDomainSummary(elementId, snapshot) {
+  const box = $(elementId);
+  if (!box) return;
+  const counts = domainCounts(snapshot);
+  if (!(snapshot || []).length) {
+    box.className = "domain-summary empty-state";
+    box.textContent = "Faça uma análise para ver o estado de cada área.";
+    return;
+  }
+  box.className = "domain-summary";
+  box.innerHTML =
+    "<span class='sum-chip ok'><b>" + counts.ok + "</b> OK</span>" +
+    "<span class='sum-chip warn'><b>" + counts.warn + "</b> parciais</span>" +
+    "<span class='sum-chip muted'><b>" + counts.muted + "</b> sem leitura</span>" +
+    "<span class='sum-chip bad'><b>" + counts.bad + "</b> falhas</span>";
+}
+
+function metricValueText(value) {
+  if (value == null) return "—";
+  if (typeof value === "boolean") return value ? "Sim" : "Não";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function domainCard(item) {
+  const details = document.createElement("details");
+  details.className = "domain-card " + statusMeta(item.status).cls;
+  const rows = (item.metrics || []).map(function (m) {
+    const value = metricValueText(m.value);
+    const long = value.length > 90;
+    return "<tr><td>" + escapeHtml(m.name) + "</td>" +
+      "<td" + (long ? " class='cell-long'" : "") + ">" + escapeHtml(value) + "</td>" +
+      "<td class='cell-src'>" + escapeHtml(m.source || "") + "</td></tr>";
+  }).join("");
+  details.innerHTML =
+    "<summary>" + statusPill(item.status) + "<strong>" + escapeHtml(item.domain) + "</strong>" +
+      (item.message ? "<em>" + escapeHtml(item.message) + "</em>" : "") +
+      "<span class='domain-open'>detalhes</span></summary>" +
+    (item.message ? "<p class='domain-msg'>" + escapeHtml(item.message) + "</p>" : "") +
+    "<div class='domain-table-wrap'><table class='kv-table'><thead><tr><th>Métrica</th><th>Valor</th><th>Fonte</th></tr></thead><tbody>" +
+    (rows || "<tr><td colspan='3' class='cell-src'>Sem métricas.</td></tr>") +
+    "</tbody></table></div>";
+  return details;
+}
+
+function renderDomainGrid(elementId, snapshot) {
+  const grid = $(elementId);
+  if (!grid) return;
+  grid.innerHTML = "";
+  if (!(snapshot || []).length) {
+    grid.className = "domain-grid empty-state";
+    grid.textContent = "Faça uma análise para listar as áreas.";
+    return;
+  }
+  grid.className = "domain-grid";
+  snapshot.forEach(function (item) { grid.appendChild(domainCard(item)); });
 }
 
 function renderHardware() {
@@ -84,6 +201,8 @@ function renderHardware() {
   const gpu = metric("GPU", "name") || (gpuAdapters[0] && gpuAdapters[0].Name) || "GPU não identificada";
   const ram = metric("RAM", "installed_gb");
   const windows = metric("Windows", "edition") || "Windows";
+  const build = metric("Windows", "build");
+  const arch = metric("Windows", "architecture");
 
   $("hardwareHero").className = "hardware-hero";
   $("hardwareHero").innerHTML =
@@ -92,18 +211,35 @@ function renderHardware() {
       "<div class='hardware-chip'><span>GPU</span><strong>" + escapeHtml(gpu) + "</strong></div>" +
       "<div class='hardware-chip'><span>RAM</span><strong>" + escapeHtml(ram == null ? "—" : ram + " GB") + "</strong></div>" +
       "<div class='hardware-chip'><span>Sistema</span><strong>" + escapeHtml(windows) + "</strong></div>" +
+      (build ? "<div class='hardware-chip'><span>Build</span><strong>" + escapeHtml(build) + (arch ? " · " + escapeHtml(arch) : "") + "</strong></div>" : "") +
     "</div>";
+}
 
-  const list = $("hardwareList");
-  list.innerHTML = "";
-  lastScan.snapshot.forEach(function (item) {
-    const details = document.createElement("details");
-    details.className = "hardware-detail";
-    details.innerHTML =
-      "<summary>" + escapeHtml(item.domain) + " · " + escapeHtml(item.status) + "</summary>" +
-      "<pre>" + escapeHtml(JSON.stringify(item, null, 2)) + "</pre>";
-    list.appendChild(details);
-  });
+function applyScan(scan) {
+  lastScan = scan;
+  const snapshot = scan.snapshot || [];
+  const issues = (scan.recommendations || []).filter(function (x) { return x.status === "RECOMMENDED"; }).length;
+  const failures = snapshot.filter(function (x) { return x.status === "FAILED"; }).length;
+
+  if (failures) {
+    $("overallStatus").textContent = failures + " área(s) falharam na leitura";
+  } else if (issues) {
+    $("overallStatus").textContent = issues + " recomendação(ões)";
+  } else {
+    $("overallStatus").textContent = "Tudo medido, nada crítico";
+  }
+  $("overallTitle").textContent = issues
+    ? "Seu PC tem oportunidades de melhoria."
+    : "Seu PC não precisa de mudanças agressivas agora.";
+  $("overallText").textContent = "Análise #" + escapeHtml(scan.scan_id != null ? scan.scan_id : scan.id) +
+    " · " + snapshot.length + " áreas medidas com leituras reais do Windows.";
+  $("technicalJson").textContent = JSON.stringify(scan, null, 2);
+
+  renderRecommendations();
+  renderHardware();
+  renderDomainSummary("homeDomainSummary", snapshot);
+  renderDomainSummary("domainSummary", snapshot);
+  renderDomainGrid("domainGrid", snapshot);
 }
 
 async function scan() {
@@ -115,16 +251,10 @@ async function scan() {
   try {
     const response = await fetch("/api/scan", { cache: "no-store" });
     if (!response.ok) throw new Error("Falha ao analisar o PC.");
-    lastScan = await response.json();
-
-    const issues = lastScan.recommendations.filter(function (x) { return x.status === "RECOMMENDED"; }).length;
-    $("overallStatus").textContent = issues ? issues + " recomendação(ões)" : "Nenhuma ação crítica";
-    $("overallTitle").textContent = issues ? "Seu PC tem oportunidades de melhoria." : "Seu PC não precisa de mudanças agressivas agora.";
-    $("overallText").textContent = "O Zeus analisou hardware, Windows, energia, segurança, inicialização e armazenamento.";
-    $("technicalJson").textContent = JSON.stringify(lastScan, null, 2);
-
-    renderRecommendations();
-    renderHardware();
+    const data = await response.json();
+    applyScan(data);
+    $("historyList").dataset.loaded = "";
+    loadHistoryList();
     toast("Análise concluída.");
   } catch (error) {
     $("overallStatus").textContent = "Falha na análise";
@@ -137,80 +267,413 @@ async function scan() {
 }
 
 function pushSeries(name, value) {
-  if (value == null || Number.isNaN(Number(value))) return;
-  series[name].push(Number(value));
-  if (series[name].length > 60) series[name].shift();
+  const numeric = Number(value);
+  if (value == null || Number.isNaN(numeric)) return;
+  series[name].push(numeric);
+  if (series[name].length > SERIES_MAX) series[name].shift();
 }
 
-function drawChart(canvasId, values) {
-  const canvas = $(canvasId);
+function fitCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth || canvas.width;
+  const cssHeight = canvas.clientHeight || canvas.height;
+  if (canvas.width !== Math.round(cssWidth * dpr)) {
+    canvas.width = Math.round(cssWidth * dpr);
+    canvas.height = Math.round(cssHeight * dpr);
+  }
   const ctx = canvas.getContext("2d");
-  const w = canvas.width;
-  const h = canvas.height;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx: ctx, w: cssWidth, h: cssHeight };
+}
+
+function drawSeries(canvasId, values, color, maxScale, unit) {
+  const canvas = $(canvasId);
+  if (!canvas) return;
+  const box = fitCanvas(canvas);
+  const ctx = box.ctx;
+  const w = box.w;
+  const h = box.h;
+  const padTop = 8;
+  const padBottom = 14;
+  const plotH = h - padTop - padBottom;
   ctx.clearRect(0, 0, w, h);
-  if (values.length < 2) return;
-  ctx.strokeStyle = "#7dff8d";
-  ctx.lineWidth = 3;
+
+  ctx.font = "9px Segoe UI, sans-serif";
+  ctx.fillStyle = "rgba(141,152,170,.75)";
+  ctx.strokeStyle = "rgba(255,255,255,.055)";
+  ctx.lineWidth = 1;
+  [0, 50, 100].forEach(function (tick) {
+    const y = padTop + plotH * (1 - tick / 100);
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+    ctx.fillText(String(Math.round(maxScale * tick / 100)) + (unit || ""), 2, y - 3);
+  });
+
+  if (!values || values.length < 2) {
+    ctx.fillStyle = "rgba(141,152,170,.75)";
+    ctx.fillText("coletando amostras…", 8, padTop + plotH / 2);
+    return;
+  }
+
+  const stepX = w / (SERIES_MAX - 1);
+  const startX = w - (values.length - 1) * stepX;
+  const scaleY = function (value) {
+    const clamped = Math.max(0, Math.min(maxScale, value));
+    return padTop + plotH * (1 - clamped / maxScale);
+  };
+
+  const gradient = ctx.createLinearGradient(0, padTop, 0, h);
+  gradient.addColorStop(0, color + "33");
+  gradient.addColorStop(1, color + "00");
+
   ctx.beginPath();
   values.forEach(function (value, index) {
-    const x = index / Math.max(1, values.length - 1) * w;
-    const y = h - Math.max(0, Math.min(100, value)) / 100 * (h - 10) - 5;
+    const x = startX + index * stepX;
+    const y = scaleY(value);
     if (index) ctx.lineTo(x, y); else ctx.moveTo(x, y);
   });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.lineJoin = "round";
   ctx.stroke();
+
+  ctx.lineTo(startX + (values.length - 1) * stepX, padTop + plotH);
+  ctx.lineTo(startX, padTop + plotH);
+  ctx.closePath();
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  const lastX = startX + (values.length - 1) * stepX;
+  const lastY = scaleY(values[values.length - 1]);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  const peak = Math.max.apply(null, values);
+  ctx.fillStyle = "rgba(245,247,251,.85)";
+  ctx.fillText("máx " + Math.round(peak) + (unit || ""), w - 58, padTop + 8);
+}
+
+function redrawCharts() {
+  drawSeries("cpuChart", series.cpu, CHART_COLORS.cpu, 100, "%");
+  drawSeries("gpuChart", series.gpu, CHART_COLORS.gpu, 100, "%");
+  drawSeries("ramChart", series.ram, CHART_COLORS.ram, 100, "%");
+  drawSeries("tempChart", series.temp, CHART_COLORS.temp, 100, "°");
+}
+
+function renderProcessTables(snapshot) {
+  const meta = $("processMeta");
+  if (meta) {
+    const when = snapshot && snapshot.timestamp
+      ? new Date(snapshot.timestamp * 1000).toLocaleTimeString("pt-BR")
+      : "—";
+    meta.textContent = snapshot
+      ? snapshot.total_processes + " processos · " + snapshot.sampled_processes + " amostrados · " +
+        snapshot.inaccessible_count + " protegidos · " + when
+      : "aguardando amostras…";
+  }
+  renderProcessBox("topCpuBox", snapshot && snapshot.top_cpu, "cpu");
+  renderProcessBox("topMemBox", snapshot && snapshot.top_memory, "mem");
+}
+
+function renderProcessBox(boxId, points, kind) {
+  const box = $(boxId);
+  if (!box) return;
+  if (!points || !points.length) {
+    box.className = "process-box empty-state";
+    box.textContent = kind === "cpu"
+      ? "Aguardando a segunda amostra para calcular o uso por processo."
+      : "Coletando…";
+    return;
+  }
+  box.className = "process-box";
+  const rows = points.slice(0, 8).map(function (point) {
+    const cpu = point.cpu_pct == null ? "—" : point.cpu_pct.toFixed(1) + "%";
+    return "<tr><td class='proc-name'>" + escapeHtml(point.name) + "</td>" +
+      "<td class='cell-src'>" + point.pid + "</td>" +
+      "<td>" + (kind === "cpu" ? cpu : formatBytes(point.working_set_bytes)) + "</td>" +
+      (kind === "cpu" ? "<td class='cell-src'>" + formatBytes(point.working_set_bytes) + "</td>" : "") +
+      "</tr>";
+  }).join("");
+  const head = kind === "cpu"
+    ? "<tr><th>Processo</th><th>PID</th><th>CPU</th><th>Memória</th></tr>"
+    : "<tr><th>Processo</th><th>PID</th><th>Memória</th></tr>";
+  box.innerHTML = "<table class='kv-table proc-table'><thead>" + head + "</thead><tbody>" + rows + "</tbody></table>";
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  const data = await response.json().catch(function () { return null; });
+  if (!response.ok) throw new Error((data && (data.error || data.message)) || "Falha na requisição.");
+  return data;
+}
+
+function applySample(data) {
+  const cpu = data.cpu_pct;
+  const gpu = data.gpu_pct;
+  const ram = data.ram_used_pct;
+  const temp = data.gpu_temp_c;
+
+  $("cpuMetric").textContent = cpu == null ? "—" : Math.round(cpu) + "%";
+  $("gpuMetric").textContent = gpu == null ? "—" : Math.round(gpu) + "%";
+  $("ramMetric").textContent = ram == null ? "—" : Math.round(ram) + "%";
+  $("tempMetric").textContent = temp == null ? "—" : Math.round(temp) + "°C";
+
+  setBar("cpuBar", cpu);
+  setBar("gpuBar", gpu);
+  setBar("ramBar", ram);
+  setBar("tempBar", temp);
+
+  $("liveCpu").textContent = cpu == null ? "—" : Math.round(cpu) + "%";
+  $("liveGpu").textContent = gpu == null ? "—" : Math.round(gpu) + "%";
+  $("liveRam").textContent = ram == null ? "—" : Math.round(ram) + "%";
+  $("liveTemp").textContent = temp == null ? "—" : Math.round(temp) + "°C";
+
+  pushSeries("cpu", cpu);
+  pushSeries("gpu", gpu);
+  pushSeries("ram", ram);
+  pushSeries("temp", temp);
+  redrawCharts();
 }
 
 async function sample() {
   try {
-    const response = await fetch("/api/observer/sample", { cache: "no-store" });
-    const data = await response.json();
-    const cpu = data.cpu_pct;
-    const gpu = data.gpu_pct;
-    const ram = data.ram_used_pct;
-    const temp = data.gpu_temp_c;
-
-    $("cpuMetric").textContent = cpu == null ? "—" : Math.round(cpu) + "%";
-    $("gpuMetric").textContent = gpu == null ? "—" : Math.round(gpu) + "%";
-    $("ramMetric").textContent = ram == null ? "—" : Math.round(ram) + "%";
-    $("tempMetric").textContent = temp == null ? "—" : Math.round(temp) + "°C";
-
-    setBar("cpuBar", cpu);
-    setBar("gpuBar", gpu);
-    setBar("ramBar", ram);
-    setBar("tempBar", temp);
-
-    $("liveCpu").textContent = cpu == null ? "—" : Math.round(cpu) + "%";
-    $("liveGpu").textContent = gpu == null ? "—" : Math.round(gpu) + "%";
-    $("liveRam").textContent = ram == null ? "—" : Math.round(ram) + "%";
-    $("liveTemp").textContent = temp == null ? "—" : Math.round(temp) + "°C";
-    $("temperatureFill").style.width = Math.max(0, Math.min(100, Number(temp || 0))) + "%";
-
-    pushSeries("cpu", cpu);
-    pushSeries("gpu", gpu);
-    pushSeries("ram", ram);
-    drawChart("cpuChart", series.cpu);
-    drawChart("gpuChart", series.gpu);
-    drawChart("ramChart", series.ram);
+    const data = await fetchJson("/api/observer/sample");
+    applySample(data);
   } catch (error) {
     console.debug(error);
   }
 }
 
+async function seedHistory() {
+  try {
+    const data = await fetchJson("/api/observer/history?limit=" + SERIES_MAX);
+    (data.samples || []).forEach(function (item) {
+      pushSeries("cpu", item.cpu_pct);
+      pushSeries("gpu", item.gpu_pct);
+      pushSeries("ram", item.ram_used_pct);
+      pushSeries("temp", item.gpu_temp_c);
+    });
+    redrawCharts();
+  } catch (error) {
+    console.debug(error);
+  }
+}
+
+async function refreshProcesses() {
+  try {
+    const data = await fetchJson("/api/observer/processes?limit=8");
+    if (data.latest) {
+      lastProcessSnapshot = data.latest;
+      renderProcessTables(data.latest);
+    }
+  } catch (error) {
+    console.debug(error);
+  }
+}
+
+function setFrequency(ms) {
+  sampleIntervalMs = ms;
+  if (sampleTimer) { clearInterval(sampleTimer); sampleTimer = null; }
+  if (processTimer) { clearInterval(processTimer); processTimer = null; }
+  if (ms > 0) {
+    sample();
+    sampleTimer = setInterval(sample, ms);
+    refreshProcesses();
+    processTimer = setInterval(refreshProcesses, Math.max(ms * 4, 5000));
+  } else {
+    $("processMeta").textContent = "observação pausada";
+  }
+  document.querySelectorAll(".freq-btn").forEach(function (button) {
+    button.classList.toggle("active", Number(button.dataset.freq) === ms);
+  });
+}
+
+document.querySelectorAll(".freq-btn").forEach(function (button) {
+  button.addEventListener("click", function () { setFrequency(Number(button.dataset.freq)); });
+});
+
 $("scanButton").addEventListener("click", scan);
 $("technicalToggle").addEventListener("click", function () { $("technicalDrawer").classList.add("open"); });
 $("closeTechnical").addEventListener("click", function () { $("technicalDrawer").classList.remove("open"); });
 
-$("observerToggle").addEventListener("click", function () {
-  if (observerTimer) {
-    clearInterval(observerTimer);
-    observerTimer = null;
-    $("observerToggle").textContent = "Iniciar observação";
+function renderPlan(plan) {
+  const panel = $("planPanel");
+  if (!panel) return;
+  const findings = plan.findings || [];
+  const summary = plan.summary || {};
+  if (!findings.length) {
+    panel.className = "plan-panel empty-state";
+    panel.textContent = "O motor não encontrou ações aplicáveis neste estado.";
     return;
   }
-  sample();
-  observerTimer = setInterval(sample, 1000);
-  $("observerToggle").textContent = "Parar observação";
-});
+  panel.className = "plan-panel";
+
+  const flatSummary = {};
+  Object.keys(summary).forEach(function (key) {
+    const value = summary[key];
+    if (value && typeof value === "object") {
+      if (key === "status_counts") {
+        Object.keys(value).forEach(function (inner) {
+          if (value[inner]) flatSummary[inner.toLowerCase().replace(/_/g, " ")] = value[inner];
+        });
+      }
+      return;
+    }
+    if (key === "apply_recommended_count" || key === "manual_review_count" || key === "blocked_count") return;
+    const labels = { finding_count: "achados", automation_eligible_count: "elegíveis p/ automação" };
+    flatSummary[labels[key] || key.replace(/_/g, " ")] = value;
+  });
+  const summaryChips = Object.keys(flatSummary).map(function (key) {
+    return "<span class='sum-chip muted'><b>" + escapeHtml(String(flatSummary[key])) + "</b> " +
+      escapeHtml(key.replace(/_/g, " ")) + "</span>";
+  }).join("");
+
+  const statusClsMap = { APPLY_RECOMMENDED: "ok", MANUAL_REVIEW: "warn", BLOCKED: "bad", NOT_APPLICABLE: "muted", ALREADY_CORRECT: "muted", NO_ACTION: "muted" };
+  const cards = findings.map(function (finding) {
+    const statusCls = statusClsMap[finding.status] || "muted";
+    const evidence = (finding.evidence || []).map(function (item) {
+      return "<div class='ev-row'><span>" + escapeHtml((item.domain || "") + " · " + (item.metric || "")) + "</span><strong>" +
+        escapeHtml(metricValueText(item.value)) + "</strong></div>";
+    }).join("");
+    const blockers = (finding.blockers || []).map(function (blocker) {
+      return "<span class='blocker-chip'>" + escapeHtml(blocker) + "</span>";
+    }).join("");
+    return "<details class='plan-card'>" +
+      "<summary><span class='state-pill " + statusCls + "'>" + escapeHtml(finding.status) + "</span>" +
+        "<strong>" + escapeHtml(finding.title) + "</strong>" +
+        "<em>" + escapeHtml(finding.category || "") + "</em></summary>" +
+      "<p class='plan-reason'>" + escapeHtml(finding.reason || "") + "</p>" +
+      (finding.benefit ? "<p class='plan-benefit'>Benefício: " + escapeHtml(finding.benefit) + "</p>" : "") +
+      "<div class='plan-tags'>" +
+        "<span class='tag'>confiança " + escapeHtml(finding.confidence || "—") + "</span>" +
+        "<span class='tag'>risco " + escapeHtml(finding.risk || "—") + "</span>" +
+        "<span class='tag'>" + (finding.reversible ? "reversível" : "não reversível") + "</span>" +
+      "</div>" +
+      (blockers ? "<div class='plan-blockers'>" + blockers + "</div>" : "") +
+      (evidence ? "<div class='evidence'>" + evidence + "</div>" : "") +
+    "</details>";
+  }).join("");
+
+  panel.innerHTML =
+    "<div class='plan-meta'>plano <code>" + escapeHtml(plan.plan_id || "") + "</code> · perfil " +
+      escapeHtml(plan.profile || "—") + " · " +
+      (plan.execution_ready ? "<span class='state-pill ok'>pronto p/ executar</span>" : "<span class='state-pill warn'>simulação (dry-run)</span>") +
+    "</div>" +
+    "<div class='domain-summary'>" + summaryChips + "</div>" +
+    cards;
+}
+
+async function generatePlan() {
+  const button = $("planButton");
+  const panel = $("planPanel");
+  button.disabled = true;
+  panel.className = "plan-panel empty-state";
+  panel.textContent = "Gerando plano a partir do estado real…";
+  try {
+    const data = await fetchJson("/api/optimization/plan");
+    renderPlan(data.plan || {});
+    if (!(data.plan && (data.plan.findings || []).length)) {
+      toast("Nenhuma ação aplicável agora.");
+    }
+  } catch (error) {
+    panel.className = "plan-panel empty-state";
+    panel.textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+$("planButton").addEventListener("click", generatePlan);
+
+function formatStamp(iso) {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return String(iso);
+  return date.toLocaleString("pt-BR");
+}
+
+async function loadHistoryList() {
+  const box = $("historyList");
+  try {
+    const data = await fetchJson("/api/history?limit=25");
+    const scans = data.scans || [];
+    box.dataset.loaded = "1";
+    if (!scans.length) {
+      box.className = "history-list empty-state";
+      box.textContent = "Nenhuma análise registrada ainda. Rode a primeira análise.";
+      return;
+    }
+    box.className = "history-list";
+    box.innerHTML = "<table class='tx-table history-table'><thead><tr>" +
+      "<th>#</th><th>Quando</th><th>Perfil</th><th>Áreas com falha</th><th>Recomendações</th><th></th>" +
+      "</tr></thead><tbody>" +
+      scans.map(function (item) {
+        const snapshot = item.snapshot || [];
+        const failures = snapshot.filter(function (entry) { return entry.status === "FAILED"; }).length;
+        const recommended = (item.recommendations || []).filter(function (entry) { return entry.status === "RECOMMENDED"; }).length;
+        return "<tr data-scan='" + item.id + "' class='history-row'>" +
+          "<td class='cell-src'>" + item.id + "</td>" +
+          "<td>" + escapeHtml(formatStamp(item.created_at)) + "</td>" +
+          "<td>" + escapeHtml(item.profile || "—") + "</td>" +
+          "<td>" + (failures ? "<span class='state-pill bad'>" + failures + "</span>" : "<span class='state-pill ok'>0</span>") + "</td>" +
+          "<td>" + recommended + "</td>" +
+          "<td><button class='mini-btn'>Abrir</button></td>" +
+        "</tr>";
+      }).join("") +
+      "</tbody></table>";
+
+    box.querySelectorAll(".history-row").forEach(function (row) {
+      row.addEventListener("click", function () { openStoredScan(Number(row.dataset.scan)); });
+    });
+  } catch (error) {
+    box.className = "history-list empty-state";
+    box.textContent = "Não foi possível carregar o histórico: " + error.message;
+  }
+}
+
+async function openStoredScan(scanId) {
+  const detail = $("historyDetail");
+  const title = $("historyDetailTitle");
+  shownHistoryId = scanId;
+  title.textContent = "Análise #" + scanId;
+  detail.className = "empty-state";
+  detail.textContent = "Carregando análise #" + scanId + "…";
+  try {
+    const scan = await fetchJson("/api/scan/" + scanId);
+    detail.className = "";
+    const recommended = (scan.recommendations || []).filter(function (x) { return x.status === "RECOMMENDED"; }).length;
+    detail.innerHTML =
+      "<p class='domain-msg'>Perfil " + escapeHtml(scan.profile || "—") + " · " +
+        escapeHtml(formatStamp(scan.created_at)) + " · " + recommended + " recomendação(ões)</p>" +
+      "<div id='historyRecs' class='recommendation-list'></div>" +
+      "<div class='domain-summary' style='margin:14px 0'></div>" +
+      "<div class='domain-grid'></div>";
+    const recBox = detail.querySelector("#historyRecs");
+    (scan.recommendations || []).forEach(function (item) { recBox.appendChild(recommendationNode(item)); });
+    renderDomainSummaryInto(detail.querySelector(".domain-summary"), scan.snapshot || []);
+    const grid = detail.querySelector(".domain-grid");
+    (scan.snapshot || []).forEach(function (item) { grid.appendChild(domainCard(item)); });
+  } catch (error) {
+    detail.className = "empty-state";
+    detail.textContent = "Falha ao carregar a análise: " + error.message;
+  }
+}
+
+function renderDomainSummaryInto(box, snapshot) {
+  const counts = domainCounts(snapshot);
+  box.className = "domain-summary";
+  box.innerHTML =
+    "<span class='sum-chip ok'><b>" + counts.ok + "</b> OK</span>" +
+    "<span class='sum-chip warn'><b>" + counts.warn + "</b> parciais</span>" +
+    "<span class='sum-chip muted'><b>" + counts.muted + "</b> sem leitura</span>" +
+    "<span class='sum-chip bad'><b>" + counts.bad + "</b> falhas</span>";
+}
+
+/* ---------- Energia: transação com consentimento ---------- */
 
 function powerApi(url, payload) {
   const options = payload === undefined
@@ -237,13 +700,6 @@ function planNameForGuid(guid) {
 function activePlanGuid() {
   const match = powerPlans.find(function (plan) { return plan.active; });
   return match ? match.guid : null;
-}
-
-function formatStamp(iso) {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return String(iso);
-  return date.toLocaleString("pt-BR");
 }
 
 function stopConsentCountdown() {
@@ -618,6 +1074,15 @@ document.querySelectorAll(".more-tile").forEach(function (tile) {
       return;
     }
 
+    if (type === "report") {
+      panel.className = "detail-panel";
+      panel.innerHTML =
+        "<div class='stage-card stage-status'><strong>Relatório de diagnóstico</strong>" +
+        "<p>O relatório é gerado pelo servidor local a partir da análise mais recente registrada, em HTML independente, e baixado direto. Nada é enviado para fora do seu PC.</p>" +
+        "<p style='margin-top:12px'><a class='primary-btn small' style='display:inline-block;text-decoration:none' href='/api/report' download>Baixar relatório</a></p></div>";
+      return;
+    }
+
     stopConsentCountdown();
     powerPending = null;
     panel.className = "detail-panel";
@@ -629,11 +1094,27 @@ document.querySelectorAll(".more-tile").forEach(function (tile) {
 
     const domainMap = { updates: "Windows Update", startup: "Startup", security: "Security" };
     const item = lastScan.snapshot.find(function (entry) { return entry.domain === domainMap[type]; });
-    panel.innerHTML = item
-      ? "<pre style='white-space:pre-wrap'>" + escapeHtml(JSON.stringify(item, null, 2)) + "</pre>"
-      : "Sem dados.";
+    if (!item) { panel.textContent = "Sem dados."; return; }
+    panel.innerHTML = "";
+    const card = domainCard(item);
+    card.open = true;
+    panel.appendChild(card);
   });
 });
+
+window.addEventListener("resize", redrawCharts);
+
+async function restoreLatestScan() {
+  try {
+    const data = await fetchJson("/api/history?limit=1");
+    const latest = (data.scans || [])[0];
+    if (!latest) return;
+    latest.scan_id = latest.id;
+    applyScan(latest);
+  } catch (error) {
+    console.debug(error);
+  }
+}
 
 (async function init() {
   try {
@@ -643,5 +1124,8 @@ document.querySelectorAll(".more-tile").forEach(function (tile) {
   } catch (error) {
     $("buildText").textContent = "Offline";
   }
-  sample();
+  await seedHistory();
+  setFrequency(1000);
+  refreshProcesses();
+  restoreLatestScan();
 })();
