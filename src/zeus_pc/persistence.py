@@ -252,6 +252,7 @@ class ZeusDatabase:
         *,
         updated_at: str,
         state: str | None = None,
+        expected_state: str | None = None,
         apply: dict[str, Any] | None | object = _UNSET,
         verify: dict[str, Any] | None | object = _UNSET,
         rollback: dict[str, Any] | None | object = _UNSET,
@@ -315,12 +316,17 @@ class ZeusDatabase:
             values.append(consent_consumed_at)
 
         values.append(transaction_id)
+        guard = ""
+        if expected_state is not None:
+            guard = "AND state = ?"
+            values.append(expected_state)
         with self.connect() as connection:
             cursor = connection.execute(
                 f"""
                 UPDATE transaction_journal
                 SET {", ".join(assignments)}
                 WHERE transaction_id = ?
+                {guard}
                 """,
                 values,
             )
