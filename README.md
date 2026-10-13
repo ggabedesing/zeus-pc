@@ -12,7 +12,7 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Motor inicial de recomendações baseado em evidências.
 - Modo técnico separado da experiência normal.
 - Servidor ligado somente em `127.0.0.1`.
-- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows e validado pelo backend.
+- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows, executada somente pelo Transaction Engine (preparar → consentimento único → executar → verificar por leitura independente → rollback automático se a verificação falhar).
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
 
 ## Como instalar no PC
@@ -94,7 +94,7 @@ O roadmap inclui:
 - baseline e comparação antes/depois;
 - limpeza segura com preview;
 - startup controlado;
-- Transaction Engine completo com consentimento, verify e rollback;
+- recuperação de crash, posse durável de recurso e endurecimento de origem de requisição no Transaction Engine;
 - PC Experience para aparência e personalização do Windows.
 
 Veja também `docs/ARCHITECTURE.md` e `docs/ROADMAP.md`.

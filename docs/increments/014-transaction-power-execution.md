@@ -51,7 +51,8 @@ POST /api/transactions/execute with transaction_id.
 The legacy /api/actions/power-plan remains blocked.
 
 ## Status
-/api/status may list SET_ACTIVE_POWER_PLAN in enabled_actions only after this lifecycle is integrated.
+Implemented. /api/status reports `execution_mode: TransactionExecution` and lists SET_ACTIVE_POWER_PLAN in enabled_actions.
+Merge waits on Windows CI validation.
 
 ## Safety
 - no arbitrary shell;

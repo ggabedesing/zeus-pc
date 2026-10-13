@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-08
+Updated: 2026-10-13
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -14,42 +14,43 @@ Updated: 2026-10-08
 - Read-only deep inventory for Windows hardware, services, tasks, processes, security, network, storage, events, software and virtualization.
 - Native CPU/RAM Observer sampling, bounded history/baselines, background runner, sessions and process-level context.
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
+- Transaction Engine foundation: journalized prepare, one-time consent, semantic registry, BeforeState capture and independent VERIFY interfaces.
 
 ## Current increment
-Increment 013 — Transaction Engine foundation.
+Increment 014 — Transaction execution lifecycle for SET_ACTIVE_POWER_PLAN.
 
 Status:
-- branch: auto/transaction-foundation;
-- SQLite schema upgraded from v1 to v2 with non-destructive transaction_journal;
-- transaction journal stores semantic action, state, normalized args, BeforeState, verify/rollback payloads, expiry and errors;
-- consent plaintext is never persisted; only SHA-256 is stored;
-- atomic one-time consent consumption added;
-- transaction states formalized from PREPARED through VERIFIED/ROLLBACK/FAILED/EXPIRED;
-- semantic ActionDefinition and ActionRegistry added;
-- initial SET_ACTIVE_POWER_PLAN definition validates exact GUID and existing plan;
-- power-plan BeforeState captures active GUID/name;
-- independent power-plan VERIFY and rollback-preview interfaces added;
-- TransactionEngine.prepare creates journaled PREPARED transaction and short-lived consent token;
-- consume_consent validates state, expiry and token with constant-time comparison, then atomically consumes it;
-- consent does not execute an action in this increment;
-- GET /api/transactions, POST /api/transactions/prepare and POST /api/transactions/consent added;
-- legacy direct POST /api/actions/power-plan is now blocked with HTTP 409;
-- /api/status reports no enabled mutations and lists preparable semantic actions;
-- tests added for prepare/BeforeState/journal, one-time consent, bad/expired tokens, unknown actions, strict args, VERIFY interface and schema v1→v2 data preservation;
+- branch: auto/transaction-power-execution;
+- SQLite schema upgraded from v2 to v3 with non-destructive `apply_json` column on `transaction_journal`;
+- `ActionDefinition` gained an optional `apply` callable plus an `executable` property, and `ActionRegistry.executable_ids()`;
+- `SET_ACTIVE_POWER_PLAN` APPLY calls `powercfg /setactive` only, with strict GUID validation and no shell;
+- VERIFY stays a fresh independent `powercfg /list` read, never the apply result;
+- rollback is derived from journaled BeforeState and independently verified with another fresh read;
+- process-local `ResourceLockManager` serializes mutations per `resource_key` (POWER_SCHEME);
+- `TransactionEngine.execute` implements CONSENTED -> APPLYING -> APPLIED -> VERIFIED with every transition persisted;
+- APPLY failure moves the transaction to FAILED and releases the resource;
+- VERIFY failure moves APPLIED -> ROLLING_BACK -> ROLLED_BACK when rollback applies and verifies;
+- unconfirmed rollback moves to FAILED and keeps the resource locked for manual recovery;
+- stale BeforeState is rejected before APPLY and the transaction stays CONSENTED;
+- VERIFIED replays are idempotent and never apply twice; PREPARED, in-flight and terminal states are rejected;
+- POST /api/transactions/execute added; rejected executions return HTTP 409 with the reason;
+- /api/status now reports `execution_mode: TransactionExecution` and lists SET_ACTIVE_POWER_PLAN as an enabled action;
+- legacy POST /api/actions/power-plan remains blocked with HTTP 409;
+- tests added for the happy path, APPLY failure, VERIFY-failure rollback, unconfirmed rollback locking, missing consent, idempotent VERIFIED, resource contention, stale BeforeState, unregistered executor and powercfg command isolation;
+- validated locally on real Windows hardware: prepare, consent, execute and idempotent replay ended VERIFIED with persisted apply and verify evidence;
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 014 — Transaction execution lifecycle for SET_ACTIVE_POWER_PLAN only: resource lock, APPLY, independent VERIFY, journal transitions and automatic rollback on failed verify.
+Increment 015 — Transaction crash recovery, host-origin request hardening and durable resource ownership before expanding the safe action catalog.
 
 ## Later order
-1. Complete Transaction Engine execution/rollback/crash recovery.
-2. Safe action catalog.
-3. Drivers and updates.
-4. Repair Center.
-5. Gaming and streaming optimization.
-6. Premium UI.
-7. PC Experience.
-8. Packaging and release.
+1. Safe action catalog.
+2. Drivers and updates.
+3. Repair Center.
+4. Gaming and streaming optimization.
+5. Premium UI.
+6. PC Experience.
+7. Packaging and release.
 
 ## Rule
 One coherent increment at a time. Do not advance while CI is broken.
