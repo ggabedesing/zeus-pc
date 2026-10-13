@@ -61,8 +61,30 @@ Status: complete on branch `auto/transaction-power-execution`.
   change; the active plan remained `e3614da8` throughout;
 - details in `docs/increments/014b-real-machine-hardening.md`.
 
+## Real dashboard (015)
+Status: complete on branch `auto/transaction-power-execution`.
+
+Scope set directly by the owner: layout, charts and functions, all real and
+functional. The planned transaction crash-recovery increment was postponed to 016.
+
+- `ZeusDatabase.get_scan`, `GET /api/scan/<id>` and `GET /api/report` (standalone
+  HTML report, escaped, attachment download) — all read-only;
+- observer always live with a 2s/1s/pause control and history backfill;
+- charts rewritten (DPR-aware canvas, grid, gradient area, peak label) for CPU,
+  GPU, RAM and GPU temperature;
+- Top CPU / Top memória process tables with real per-process usage and an honest
+  first-sample empty state;
+- Meu PC renders 30 domain cards with honest status pills and metric tables;
+- Otimizar renders the formal optimization plan (evidence, confidence, risk,
+  blockers) that was previously API-only;
+- new Histórico page lists stored analyses and reopens any of them;
+- exportação de relatório em três pontos da interface;
+- latest analysis is restored after a page reload;
+- validated in a real browser with zero console errors; 119 tests green;
+- details in `docs/increments/015-real-dashboard.md`.
+
 ## Next increment
-Increment 015 — Transaction crash recovery, host-origin request hardening and durable resource ownership before expanding the safe action catalog.
+Increment 016 — Transaction crash recovery, host-origin request hardening and durable resource ownership before expanding the safe action catalog. (Postponed from 015 by owner request; 015 became the real dashboard.)
 
 ## Later order
 1. Safe action catalog.

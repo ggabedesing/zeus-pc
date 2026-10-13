@@ -17,6 +17,8 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Cada domínio declara o estado real da leitura: `OK` só quando há valor utilizável, `REQUIRES_ELEVATION`, `UNSUPPORTED`, `PARTIAL` ou `NOT_CHECKED` quando não há. Uma sonda que não leu nada não afirma que está tudo bem.
 - Inventários que exigem administrador foram trocados por fontes CIM legíveis em sessão comum, caso do Windows Features via `Win32_OptionalFeature`.
 - O painel **Energia** da interface conduz o fluxo completo: preparar, consentir com validade e confirmação explícita, executar e ler o resultado real do diário de transações.
+- Observer sempre ativo com gráficos reais de CPU, GPU, RAM e temperatura, tabelas de processos por uso de CPU e memória, e histórico das análises registradas, tudo em dados reais da máquina.
+- Relatório de diagnóstico em HTML gerado localmente e baixável pela interface; nada sai do PC.
 
 ## Como instalar no PC
 
