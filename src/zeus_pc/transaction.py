@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Callable
 
-from .actions import GUID_RE, list_power_plans
+from .actions import GUID_RE, apply_power_plan, list_power_plans
 from .persistence import ZeusDatabase
 
 
@@ -34,6 +35,7 @@ Validator = Callable[[dict[str, Any]], dict[str, Any]]
 BeforeCapture = Callable[[dict[str, Any]], dict[str, Any]]
 Verifier = Callable[[dict[str, Any]], dict[str, Any]]
 RollbackPreview = Callable[[dict[str, Any]], dict[str, Any] | None]
+Applier = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,37 @@ class ActionDefinition:
     capture_before: BeforeCapture
     verify: Verifier
     rollback_preview: RollbackPreview
+    apply: Applier | None = None
+
+    @property
+    def executable(self) -> bool:
+        return self.apply is not None
+
+
+class ResourceLockManager:
+    """Process-local advisory locks keyed by resource so one resource mutates once at a time."""
+
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._owners: dict[str, str] = {}
+
+    def acquire(self, resource_key: str, transaction_id: str) -> bool:
+        with self._guard:
+            if resource_key in self._owners:
+                return False
+            self._owners[resource_key] = transaction_id
+            return True
+
+    def release(self, resource_key: str, transaction_id: str) -> bool:
+        with self._guard:
+            if self._owners.get(resource_key) != transaction_id:
+                return False
+            del self._owners[resource_key]
+            return True
+
+    def owner(self, resource_key: str) -> str | None:
+        with self._guard:
+            return self._owners.get(resource_key)
 
 
 class ActionRegistry:
@@ -66,6 +99,13 @@ class ActionRegistry:
     def ids(self) -> list[str]:
         return sorted(self._items)
 
+    def executable_ids(self) -> list[str]:
+        return sorted(
+            action_id
+            for action_id, definition in self._items.items()
+            if definition.executable
+        )
+
 
 @dataclass(slots=True)
 class PreparedTransaction:
@@ -78,6 +118,7 @@ class PreparedTransaction:
     created_at: str
     consent_expires_at: str
     consent_token: str
+    execution_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,7 +131,7 @@ class PreparedTransaction:
             "created_at": self.created_at,
             "consent_expires_at": self.consent_expires_at,
             "consent_token": self.consent_token,
-            "execution_enabled": False,
+            "execution_enabled": self.execution_enabled,
         }
 
 
@@ -156,6 +197,18 @@ def _verify_power_target(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _apply_power_plan(args: dict[str, Any]) -> dict[str, Any]:
+    guid = str(args.get("guid") or "").strip().lower()
+    if not GUID_RE.fullmatch(guid):
+        return {"ok": False, "message": "GUID invalido."}
+    result = apply_power_plan(guid)
+    return {
+        "ok": result.ok,
+        "message": result.message,
+        "command": "powercfg /setactive",
+    }
+
+
 def _power_rollback_preview(
     before_state: dict[str, Any],
 ) -> dict[str, Any] | None:
@@ -180,12 +233,24 @@ def build_default_registry() -> ActionRegistry:
             capture_before=_capture_power_before,
             verify=_verify_power_target,
             rollback_preview=_power_rollback_preview,
+            apply=_apply_power_plan,
         )
     )
     return registry
 
 
 DEFAULT_ACTION_REGISTRY = build_default_registry()
+
+_EXECUTION_REJECTIONS = {
+    TransactionState.PREPARED.value: "Consentimento obrigatorio antes da execucao.",
+    TransactionState.APPLYING.value: "Transacao em aplicacao. Reexecucao manual fica para a etapa de recuperacao.",
+    TransactionState.APPLIED.value: "Transacao ja aplicada; aguarda VERIFY e nao pode reexecutar.",
+    TransactionState.ROLLING_BACK.value: "Rollback ja esta em andamento.",
+    TransactionState.FAILED.value: "Transacao falhou e nao pode ser reexecutada.",
+    TransactionState.ROLLED_BACK.value: "Transacao revertida e nao pode ser reexecutada.",
+    TransactionState.EXPIRED.value: "Consentimento expirado.",
+    TransactionState.CANCELLED.value: "Transacao cancelada.",
+}
 
 
 class TransactionEngine:
@@ -194,9 +259,11 @@ class TransactionEngine:
         database: ZeusDatabase,
         registry: ActionRegistry = DEFAULT_ACTION_REGISTRY,
         consent_ttl_seconds: int = 300,
+        locks: ResourceLockManager | None = None,
     ) -> None:
         self.database = database
         self.registry = registry
+        self.locks = locks if locks is not None else ResourceLockManager()
         self.consent_ttl_seconds = min(
             max(int(consent_ttl_seconds), 30),
             1800,
@@ -247,6 +314,7 @@ class TransactionEngine:
             created_at=_iso(now),
             consent_expires_at=_iso(expires),
             consent_token=consent_token,
+            execution_enabled=definition.executable,
         )
 
     def consume_consent(
@@ -293,11 +361,209 @@ class TransactionEngine:
         public = self.database.get_transaction(transaction_id)
         if public is None:
             raise TransactionError("Transacao nao encontrada apos consentimento.")
-        public["execution_enabled"] = False
+        definition = self.registry.get(public["action_id"])
+        executable = bool(definition and definition.executable)
+        public["execution_enabled"] = executable
         public["message"] = (
-            "Consentimento registrado. A execucao continua bloqueada nesta etapa."
+            "Consentimento registrado. Execute com POST /api/transactions/execute."
+            if executable
+            else "Consentimento registrado. Nenhum executor registrado para esta acao."
         )
         return public
+
+    def _move(
+        self,
+        transaction_id: str,
+        *,
+        expected: TransactionState,
+        target: TransactionState,
+        **fields: Any,
+    ) -> bool:
+        return self.database.update_transaction(
+            transaction_id,
+            updated_at=_iso(_utc_now()),
+            state=target.value,
+            expected_state=expected.value,
+            **fields,
+        )
+
+    def _run(
+        self,
+        stage: Callable[[dict[str, Any]], dict[str, Any]],
+        args: dict[str, Any],
+        failure_prefix: str,
+    ) -> dict[str, Any]:
+        try:
+            evidence = stage(args)
+        except Exception as exc:
+            return {"ok": False, "message": f"{failure_prefix}: {exc}"}
+        if not isinstance(evidence, dict):
+            return {"ok": False, "message": f"{failure_prefix}: evidencia invalida."}
+        return evidence
+
+    def _result(
+        self,
+        transaction_id: str,
+        fallback: dict[str, Any],
+        message: str,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        public = self.database.get_transaction(transaction_id) or fallback
+        public["execution_enabled"] = True
+        public["message"] = message
+        public.update(extra)
+        return public
+
+    def execute(self, transaction_id: str) -> dict[str, Any]:
+        transaction = self.database.get_transaction(transaction_id)
+        if transaction is None:
+            raise TransactionError("Transacao nao encontrada.")
+
+        state = str(transaction["state"])
+        if state == TransactionState.VERIFIED.value:
+            return self._result(
+                transaction_id,
+                transaction,
+                "Transacao ja verificada. Nenhuma alteracao aplicada novamente.",
+                idempotent=True,
+            )
+        if state != TransactionState.CONSENTED.value:
+            raise TransactionError(_EXECUTION_REJECTIONS.get(state, "Estado nao executavel."))
+
+        definition = self.registry.get(str(transaction["action_id"]))
+        if definition is None or not definition.executable:
+            raise TransactionError("Nenhum executor registrado para esta acao.")
+
+        args = dict(transaction["args"])
+        before_state = dict(transaction["before_state"])
+        current_before = definition.capture_before(args)
+        if current_before != before_state:
+            self.database.update_transaction(
+                transaction_id,
+                updated_at=_iso(_utc_now()),
+                expected_state=TransactionState.CONSENTED.value,
+                error_text="BeforeState desatualizado na execucao.",
+            )
+            raise TransactionError(
+                "BeforeState desatualizado. Prepare uma nova transacao."
+            )
+
+        rollback_plan = (
+            definition.rollback_preview(before_state)
+            if definition.reversible
+            else None
+        )
+        if definition.reversible and rollback_plan is None:
+            raise TransactionError("Rollback indisponivel. Execucao bloqueada por seguranca.")
+
+        resource_key = definition.resource_key
+        if not self.locks.acquire(resource_key, transaction_id):
+            owner = self.locks.owner(resource_key)
+            raise TransactionError(
+                f"Recurso {resource_key} ocupado pela transacao {owner}."
+            )
+
+        if not self._move(
+            transaction_id,
+            expected=TransactionState.CONSENTED,
+            target=TransactionState.APPLYING,
+        ):
+            self.locks.release(resource_key, transaction_id)
+            raise TransactionError("A transacao mudou de estado antes da execucao.")
+
+        apply_evidence = self._run(
+            definition.apply,
+            args,
+            "APPLY falhou",
+        )
+        if not apply_evidence.get("ok"):
+            self._move(
+                transaction_id,
+                expected=TransactionState.APPLYING,
+                target=TransactionState.FAILED,
+                apply=apply_evidence,
+                error_text=str(apply_evidence.get("message") or "APPLY falhou."),
+            )
+            self.locks.release(resource_key, transaction_id)
+            return self._result(
+                transaction_id,
+                transaction,
+                "APPLY falhou. Nenhuma alteracao confirmada pelo Windows.",
+            )
+
+        self._move(
+            transaction_id,
+            expected=TransactionState.APPLYING,
+            target=TransactionState.APPLIED,
+            apply=apply_evidence,
+            error_text=None,
+        )
+
+        verify_evidence = self._run(definition.verify, args, "VERIFY falhou")
+        if verify_evidence.get("ok"):
+            self._move(
+                transaction_id,
+                expected=TransactionState.APPLIED,
+                target=TransactionState.VERIFIED,
+                verify=verify_evidence,
+            )
+            self.locks.release(resource_key, transaction_id)
+            return self._result(
+                transaction_id,
+                transaction,
+                "Acao aplicada e verificada por leitura independente.",
+            )
+
+        self._move(
+            transaction_id,
+            expected=TransactionState.APPLIED,
+            target=TransactionState.ROLLING_BACK,
+            verify=verify_evidence,
+            error_text="VERIFY independente falhou. Rollback em andamento.",
+        )
+
+        rollback_args = dict(rollback_plan.get("args") or {})
+        rollback_apply = self._run(definition.apply, rollback_args, "ROLLBACK falhou")
+        rollback_verify = (
+            self._run(definition.verify, rollback_args, "VERIFY do rollback falhou")
+            if rollback_apply.get("ok")
+            else None
+        )
+        rollback_evidence = {
+            "target": rollback_plan,
+            "apply": rollback_apply,
+            "verify": rollback_verify,
+        }
+
+        if rollback_apply.get("ok") and (rollback_verify or {}).get("ok"):
+            self._move(
+                transaction_id,
+                expected=TransactionState.ROLLING_BACK,
+                target=TransactionState.ROLLED_BACK,
+                rollback=rollback_evidence,
+                error_text="VERIFY independente falhou. Estado anterior restaurado.",
+            )
+            self.locks.release(resource_key, transaction_id)
+            return self._result(
+                transaction_id,
+                transaction,
+                "VERIFY falhou. O estado anterior foi restaurado e confirmado.",
+            )
+
+        self._move(
+            transaction_id,
+            expected=TransactionState.ROLLING_BACK,
+            target=TransactionState.FAILED,
+            rollback=rollback_evidence,
+            error_text="VERIFY falhou e o rollback nao foi confirmado.",
+        )
+        return self._result(
+            transaction_id,
+            transaction,
+            "VERIFY falhou e o rollback nao foi confirmado. "
+            "O recurso permanece travado ate recuperacao manual.",
+            resource_locked=True,
+        )
 
     def verify_target(
         self,
