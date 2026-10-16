@@ -84,6 +84,15 @@ O projeto não deve desativar Defender, Firewall, Secure Boot, TPM ou outras pro
 
 Drivers e atualizações devem usar fontes oficiais.
 
+A API local valida Host/Origin e exige uma sessão temporária em memória.
+A interface obtém e envia essa sessão automaticamente, inclusive ao exportar
+relatórios. Para clientes locais, faça `GET /api/session` e envie o
+`session_token` retornado no cabeçalho `X-Zeus-Session` das demais requisições.
+POST aceita apenas um objeto JSON em UTF-8 com `Content-Type: application/json`.
+O token muda ao reiniciar o servidor; operações mutáveis não são repetidas
+automaticamente. Isso protege a fronteira do navegador, sem autenticar usuários
+do Windows ou bloquear outros programas locais.
+
 BIOS/firmware não devem ser atualizados automaticamente enquanto não existir estratégia específica e verificável do fabricante.
 
 ## Próximas áreas

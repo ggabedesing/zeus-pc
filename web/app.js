@@ -249,7 +249,7 @@ async function scan() {
   $("overallStatus").textContent = "Analisando o sistema";
 
   try {
-    const response = await fetch("/api/scan", { cache: "no-store" });
+    const response = await zeusAPI.fetch("/api/scan", { cache: "no-store" });
     if (!response.ok) throw new Error("Falha ao analisar o PC.");
     const data = await response.json();
     applyScan(data);
@@ -405,7 +405,7 @@ function renderProcessBox(boxId, points, kind) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await zeusAPI.fetch(url, { cache: "no-store" });
   const data = await response.json().catch(function () { return null; });
   if (!response.ok) throw new Error((data && (data.error || data.message)) || "Falha na requisição.");
   return data;
@@ -683,7 +683,7 @@ function powerApi(url, payload) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       };
-  return fetch(url, options).then(function (response) {
+  return zeusAPI.fetch(url, options).then(function (response) {
     return response.json().then(
       function (data) { return { ok: response.ok, status: response.status, data: data }; },
       function () { return { ok: response.ok, status: response.status, data: null }; }
@@ -1104,6 +1104,33 @@ document.querySelectorAll(".more-tile").forEach(function (tile) {
 
 window.addEventListener("resize", redrawCharts);
 
+document.addEventListener("click", async function (event) {
+  const link = event.target.closest("a[download]");
+  if (!link) return;
+  const url = new URL(link.href, location.origin);
+  if (url.origin !== location.origin || url.pathname !== "/api/report") return;
+  event.preventDefault();
+  try {
+    const response = await zeusAPI.fetch(url.href);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.message || error.error || "Não foi possível exportar o relatório.");
+    }
+    const blobUrl = URL.createObjectURL(await response.blob());
+    const download = document.createElement("a");
+    download.href = blobUrl;
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const filename = disposition.match(/filename=(zeus-pc-relatorio-[a-z0-9-]+\.html)/i);
+    download.download = filename ? filename[1] : "zeus-pc-relatorio.html";
+    document.body.appendChild(download);
+    download.click();
+    download.remove();
+    setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 30000);
+  } catch (error) {
+    toast(error.message || "Falha ao exportar relatório.");
+  }
+});
+
 async function restoreLatestScan() {
   try {
     const data = await fetchJson("/api/history?limit=1");
@@ -1118,7 +1145,7 @@ async function restoreLatestScan() {
 
 (async function init() {
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
+    const response = await zeusAPI.fetch("/api/status", { cache: "no-store" });
     const status = await response.json();
     $("buildText").textContent = "v" + status.version + " · " + status.build;
   } catch (error) {

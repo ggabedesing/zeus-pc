@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -12,6 +13,7 @@ from .actions import list_power_plans
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
+from .http_security import REQUEST_TIMEOUT_SECONDS, RequestRejected, read_json_object, validate_request
 from .observer import OBSERVER, OBSERVER_RUNNER
 from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
@@ -83,8 +85,34 @@ def _sync_observer_runner(enabled: bool) -> None:
             APP_LOG.write("observer_stopped")
 
 
+class LocalHTTPServer(ThreadingHTTPServer):
+    def __init__(self, server_address, handler_class):
+        self.api_session_token = secrets.token_urlsafe(32)
+        super().__init__(server_address, handler_class)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ZeusPC/0.1"
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "same-origin")
+        super().end_headers()
+
+    def authorize(self, *, bootstrap=False):
+        try:
+            validate_request(self, bootstrap=bootstrap)
+        except (RequestRejected, ValueError) as exc:
+            self.close_connection = True
+            self.send_json({"ok": False, "message": str(exc)}, getattr(exc, "status", 400))
+            return False
+        return True
 
     def log_message(self, fmt, *args):
         return
@@ -99,13 +127,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 65536:
-            raise ValueError("Payload muito grande.")
-        raw = self.rfile.read(length) if length else b"{}"
-        return json.loads(raw.decode("utf-8") or "{}")
+        return read_json_object(self)
 
     def do_GET(self):
+        if not self.authorize(bootstrap=self.path == "/api/session"):
+            return
+        if self.path == "/api/session":
+            return self.send_json({"session_token": self.server.api_session_token})
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -301,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if not self.authorize():
+            return
         path = urlparse(self.path).path
         try:
             payload = self.read_json()
@@ -417,6 +447,9 @@ class Handler(BaseHTTPRequestHandler):
                 )
 
             return self.send_json({"error": "Acao bloqueada."}, 404)
+        except RequestRejected as exc:
+            self.close_connection = True
+            return self.send_json({"ok": False, "message": str(exc)}, exc.status)
         except Exception as exc:
             APP_LOG.write(
                 "request_failed",
@@ -441,7 +474,7 @@ def main():
     )
     print(f"Zeus PC {__version__} ({BUILD})")
     print(f"http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = LocalHTTPServer((HOST, PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

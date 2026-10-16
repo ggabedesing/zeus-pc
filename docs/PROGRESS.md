@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-13
+Updated: 2026-10-16
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -84,7 +84,19 @@ functional. The planned transaction crash-recovery increment was postponed to 01
 - details in `docs/increments/015-real-dashboard.md`.
 
 ## Next increment
-Increment 016 — Transaction crash recovery, host-origin request hardening and durable resource ownership before expanding the safe action catalog. (Postponed from 015 by owner request; 015 became the real dashboard.)
+Increment 016A — Local API browser boundary implemented on the current branch:
+- exact loopback Host/port validation including default HTTP port;
+- matching Origin/Referer, Fetch Metadata checks and anti-framing headers;
+- per-server ephemeral API session, held only in browser memory;
+- strict JSON object parsing, bounded payloads and socket receive timeout;
+- authenticated browser requests and report downloads without mutation replay;
+- 141 Python tests run (140 passed, one Windows-codec skip) and six Node tests passed;
+- independent review fix for port 80; real HTTP client flow verified;
+- browser visual verification unavailable (Playwright Chromium not installed);
+- details in `docs/increments/016a-local-api-boundary.md`; pending fresh Windows CI.
+
+Next: Increment 016B — Transaction crash recovery and durable resource ownership
+before expanding the safe action catalog.
 
 ## Later order
 1. Safe action catalog.
