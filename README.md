@@ -12,8 +12,13 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Motor inicial de recomendações baseado em evidências.
 - Modo técnico separado da experiência normal.
 - Servidor ligado somente em `127.0.0.1`.
-- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows e validado pelo backend.
+- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows, executada somente pelo Transaction Engine (preparar → consentimento único → executar → verificar por leitura independente → rollback automático se a verificação falhar).
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
+- Cada domínio declara o estado real da leitura: `OK` só quando há valor utilizável, `REQUIRES_ELEVATION`, `UNSUPPORTED`, `PARTIAL` ou `NOT_CHECKED` quando não há. Uma sonda que não leu nada não afirma que está tudo bem.
+- Inventários que exigem administrador foram trocados por fontes CIM legíveis em sessão comum, caso do Windows Features via `Win32_OptionalFeature`.
+- O painel **Energia** da interface conduz o fluxo completo: preparar, consentir com validade e confirmação explícita, executar e ler o resultado real do diário de transações.
+- Observer sempre ativo com gráficos reais de CPU, GPU, RAM e temperatura, tabelas de processos por uso de CPU e memória, e histórico das análises registradas, tudo em dados reais da máquina.
+- Relatório de diagnóstico em HTML gerado localmente e baixável pela interface; nada sai do PC.
 
 ## Como instalar no PC
 
@@ -79,6 +84,15 @@ O projeto não deve desativar Defender, Firewall, Secure Boot, TPM ou outras pro
 
 Drivers e atualizações devem usar fontes oficiais.
 
+A API local valida Host/Origin e exige uma sessão temporária em memória.
+A interface obtém e envia essa sessão automaticamente, inclusive ao exportar
+relatórios. Para clientes locais, faça `GET /api/session` e envie o
+`session_token` retornado no cabeçalho `X-Zeus-Session` das demais requisições.
+POST aceita apenas um objeto JSON em UTF-8 com `Content-Type: application/json`.
+O token muda ao reiniciar o servidor; operações mutáveis não são repetidas
+automaticamente. Isso protege a fronteira do navegador, sem autenticar usuários
+do Windows ou bloquear outros programas locais.
+
 BIOS/firmware não devem ser atualizados automaticamente enquanto não existir estratégia específica e verificável do fabricante.
 
 ## Próximas áreas
@@ -94,7 +108,7 @@ O roadmap inclui:
 - baseline e comparação antes/depois;
 - limpeza segura com preview;
 - startup controlado;
-- Transaction Engine completo com consentimento, verify e rollback;
+- recuperação de crash, posse durável de recurso e endurecimento de origem de requisição no Transaction Engine;
 - PC Experience para aparência e personalização do Windows.
 
 Veja também `docs/ARCHITECTURE.md` e `docs/ROADMAP.md`.

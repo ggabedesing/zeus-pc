@@ -12,8 +12,10 @@ from .inventory import processes_probe, scheduled_tasks_probe, services_probe
 from .platform_inventory import firewall_probe, network_link_probe, proxy_probe, tpm_probe
 from .storage_health import physical_storage_probe, storage_reliability_probe, trim_probe, windows_event_summary_probe
 from .software_platform import installed_software_probe, optional_features_probe, virtualization_probe
-from .models import Metric, ProbeResult, Status
+from .models import Metric, ProbeResult, Status, demote_if_unknown, humanize_probe_error
 from .powershell import run, run_json
+
+_demote_if_unknown = demote_if_unknown
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -39,7 +41,8 @@ def windows_probe() -> ProbeResult:
         ]
         return ProbeResult("Windows", Status.OK, metrics, source="CIM")
     except Exception as exc:
-        return ProbeResult("Windows", Status.PARTIAL, metrics, str(exc), "platform")
+        status, message = humanize_probe_error(exc, "Win32_OperatingSystem", Status.PARTIAL)
+        return ProbeResult("Windows", status, metrics, message, "platform")
 
 
 def cpu_probe() -> ProbeResult:
@@ -56,7 +59,8 @@ def cpu_probe() -> ProbeResult:
             Metric("load_pct", data.get("LoadPercentage"), "%", "Win32_Processor"),
         ], source="Win32_Processor")
     except Exception as exc:
-        return ProbeResult("CPU", Status.FAILED, message=str(exc), source="Win32_Processor")
+        status, message = humanize_probe_error(exc, "Win32_Processor")
+        return ProbeResult("CPU", status, message=message, source="Win32_Processor")
 
 
 def ram_probe() -> ProbeResult:
@@ -81,7 +85,8 @@ def ram_probe() -> ProbeResult:
             Metric("modules", modules, source="Win32_PhysicalMemory"),
         ], source="CIM")
     except Exception as exc:
-        return ProbeResult("RAM", Status.FAILED, message=str(exc), source="CIM")
+        status, message = humanize_probe_error(exc, "CIM")
+        return ProbeResult("RAM", status, message=message, source="CIM")
 
 
 def gpu_probe() -> ProbeResult:
@@ -95,7 +100,8 @@ def gpu_probe() -> ProbeResult:
             adapters = [adapters]
         metrics.append(Metric("adapters", adapters or [], source="Win32_VideoController"))
     except Exception as exc:
-        return ProbeResult("GPU", Status.FAILED, message=str(exc), source="Win32_VideoController")
+        status, message = humanize_probe_error(exc, "Win32_VideoController")
+        return ProbeResult("GPU", status, message=message, source="Win32_VideoController")
 
     smi = shutil.which("nvidia-smi")
     if smi:
@@ -150,7 +156,8 @@ def motherboard_probe() -> ProbeResult:
             Metric("version", data.get("Version"), source="Win32_BaseBoard"),
         ], source="Win32_BaseBoard")
     except Exception as exc:
-        return ProbeResult("Motherboard", Status.FAILED, message=str(exc), source="Win32_BaseBoard")
+        status, message = humanize_probe_error(exc, "Win32_BaseBoard")
+        return ProbeResult("Motherboard", status, message=message, source="Win32_BaseBoard")
 
 
 def bios_probe() -> ProbeResult:
@@ -165,7 +172,8 @@ def bios_probe() -> ProbeResult:
             Metric("release_date", data.get("ReleaseDate"), source="Win32_BIOS"),
         ], source="Win32_BIOS")
     except Exception as exc:
-        return ProbeResult("BIOS", Status.FAILED, message=str(exc), source="Win32_BIOS")
+        status, message = humanize_probe_error(exc, "Win32_BIOS")
+        return ProbeResult("BIOS", status, message=message, source="Win32_BIOS")
 
 
 def power_probe() -> ProbeResult:
@@ -182,7 +190,8 @@ def power_probe() -> ProbeResult:
             Metric("active_guid", guid_match.group(1).lower() if guid_match else None, source="powercfg /getactivescheme"),
         ], source="powercfg")
     except Exception as exc:
-        return ProbeResult("Power", Status.FAILED, message=str(exc), source="powercfg")
+        status, message = humanize_probe_error(exc, "powercfg")
+        return ProbeResult("Power", status, message=message, source="powercfg")
 
 
 def secure_boot_probe() -> ProbeResult:
@@ -198,7 +207,8 @@ def secure_boot_probe() -> ProbeResult:
     code, out, err = run("Confirm-SecureBootUEFI")
     if code == 0:
         return ProbeResult("Secure Boot", Status.OK, [Metric("enabled", out.lower() == "true", source="Confirm-SecureBootUEFI")], source="Confirm-SecureBootUEFI")
-    return ProbeResult("Secure Boot", Status.FAILED, message=err or out, source="Confirm-SecureBootUEFI")
+    status, message = humanize_probe_error(RuntimeError(err or out), "Confirm-SecureBootUEFI", Status.FAILED)
+    return ProbeResult("Secure Boot", status, message=message, source="Confirm-SecureBootUEFI")
 
 
 def security_probe() -> ProbeResult:
@@ -213,7 +223,8 @@ def security_probe() -> ProbeResult:
             Metric("behavior_monitor_enabled", data.get("BehaviorMonitorEnabled"), source="Get-MpComputerStatus"),
         ], source="Microsoft Defender")
     except Exception as exc:
-        return ProbeResult("Security", Status.PARTIAL, message=str(exc), source="Microsoft Defender")
+        status, message = humanize_probe_error(exc, "Microsoft Defender", Status.PARTIAL)
+        return ProbeResult("Security", status, message=message, source="Microsoft Defender")
 
 
 def startup_probe() -> ProbeResult:
@@ -226,7 +237,8 @@ def startup_probe() -> ProbeResult:
             items = [items]
         return ProbeResult("Startup", Status.OK, [Metric("items", items or [], source="Win32_StartupCommand")], source="Win32_StartupCommand")
     except Exception as exc:
-        return ProbeResult("Startup", Status.FAILED, message=str(exc), source="Win32_StartupCommand")
+        status, message = humanize_probe_error(exc, "Win32_StartupCommand")
+        return ProbeResult("Startup", status, message=message, source="Win32_StartupCommand")
 
 
 def update_probe() -> ProbeResult:
@@ -235,10 +247,11 @@ def update_probe() -> ProbeResult:
         return blocked
     script = "$s=New-Object -ComObject Microsoft.Update.Session; $r=$s.CreateUpdateSearcher().Search('IsInstalled=0 and IsHidden=0'); [PSCustomObject]@{Pending=$r.Updates.Count}"
     try:
-        data = run_json(script, timeout=12)
+        data = run_json(script, timeout=25)
         return ProbeResult("Windows Update", Status.OK, [Metric("pending_count", int(data.get("Pending") or 0), source="Windows Update Agent")], source="Windows Update Agent")
     except Exception as exc:
-        return ProbeResult("Windows Update", Status.PARTIAL, message=str(exc), source="Windows Update Agent")
+        status, message = humanize_probe_error(exc, "Windows Update", Status.PARTIAL)
+        return ProbeResult("Windows Update", status, message=message, source="Windows Update Agent")
 
 
 
@@ -261,7 +274,8 @@ def drivers_probe() -> ProbeResult:
             Metric("items", drivers, source="Win32_PnPSignedDriver"),
         ], source="Win32_PnPSignedDriver")
     except Exception as exc:
-        return ProbeResult("Drivers", Status.FAILED, message=str(exc), source="Win32_PnPSignedDriver")
+        status, message = humanize_probe_error(exc, "Win32_PnPSignedDriver")
+        return ProbeResult("Drivers", status, message=message, source="Win32_PnPSignedDriver")
 
 
 def devices_probe() -> ProbeResult:
@@ -277,12 +291,13 @@ def devices_probe() -> ProbeResult:
         if isinstance(devices, dict):
             devices = [devices]
         devices = devices or []
-        return ProbeResult("Devices", Status.OK, [
+        return _demote_if_unknown(ProbeResult("Devices", Status.OK, [
             Metric("problem_count", len(devices), source="Win32_PnPEntity"),
             Metric("problems", devices, source="Win32_PnPEntity"),
-        ], source="Win32_PnPEntity")
+        ], source="Win32_PnPEntity"), {"problem_count"})
     except Exception as exc:
-        return ProbeResult("Devices", Status.FAILED, message=str(exc), source="Win32_PnPEntity")
+        status, message = humanize_probe_error(exc, "Win32_PnPEntity")
+        return ProbeResult("Devices", status, message=message, source="Win32_PnPEntity")
 
 
 def network_probe() -> ProbeResult:
@@ -303,7 +318,8 @@ def network_probe() -> ProbeResult:
             Metric("adapters", adapters, source="Win32_NetworkAdapterConfiguration"),
         ], source="Win32_NetworkAdapterConfiguration")
     except Exception as exc:
-        return ProbeResult("Network", Status.FAILED, message=str(exc), source="Win32_NetworkAdapterConfiguration")
+        status, message = humanize_probe_error(exc, "Win32_NetworkAdapterConfiguration")
+        return ProbeResult("Network", status, message=message, source="Win32_NetworkAdapterConfiguration")
 
 
 def integrity_probe() -> ProbeResult:
@@ -327,7 +343,8 @@ def integrity_probe() -> ProbeResult:
             Metric("dism_checked", False, source="policy"),
         ], message="SFC e DISM não foram executados; a integridade de arquivos do sistema ainda não foi confirmada.", source="servicing state")
     except Exception as exc:
-        return ProbeResult("Integrity", Status.PARTIAL, message=str(exc), source="servicing state")
+        status, message = humanize_probe_error(exc, "servicing state", Status.PARTIAL)
+        return ProbeResult("Integrity", status, message=message, source="servicing state")
 
 def collect_all() -> list[ProbeResult]:
     probes = [windows_probe, cpu_probe, ram_probe, gpu_probe, storage_probe, physical_storage_probe, storage_reliability_probe, trim_probe, motherboard_probe, bios_probe, power_probe, secure_boot_probe, tpm_probe, security_probe, firewall_probe, startup_probe, update_probe, drivers_probe, devices_probe, network_probe, network_link_probe, proxy_probe, services_probe, scheduled_tasks_probe, processes_probe, installed_software_probe, virtualization_probe, optional_features_probe, windows_event_summary_probe, integrity_probe]
@@ -336,5 +353,6 @@ def collect_all() -> list[ProbeResult]:
         try:
             results.append(probe())
         except Exception as exc:
-            results.append(ProbeResult(probe.__name__, Status.FAILED, message=str(exc)))
+            status, message = humanize_probe_error(exc, probe.__name__, Status.FAILED)
+            results.append(ProbeResult(probe.__name__, status, message=message))
     return results

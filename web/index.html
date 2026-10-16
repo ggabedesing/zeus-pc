@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Zeus PC</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b1019'/%3E%3Ctext x='16' y='22' font-size='18' font-weight='900' text-anchor='middle' fill='%237dff8d' font-family='Segoe UI'%3EZ%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -18,6 +19,7 @@
         <button class="nav-item" data-page="optimize"><span>⚡</span><b>Otimizar</b></button>
         <button class="nav-item" data-page="performance"><span>◉</span><b>Desempenho</b></button>
         <button class="nav-item" data-page="mypc"><span>▣</span><b>Meu PC</b></button>
+        <button class="nav-item" data-page="history"><span>≡</span><b>Histórico</b></button>
         <button class="nav-item" data-page="more"><span>•••</span><b>Mais</b></button>
       </nav>
       <div class="sidebar-foot">
@@ -43,7 +45,10 @@
               <span class="status-pill" id="overallStatus">Pronto para analisar</span>
               <h2 id="overallTitle">Vamos descobrir o que seu PC realmente precisa.</h2>
               <p id="overallText">O Zeus não aplica ajustes universais. Primeiro ele mede, depois recomenda.</p>
-              <button class="primary-btn" id="scanButton">Analisar meu PC</button>
+              <div class="hero-actions">
+                <button class="primary-btn" id="scanButton">Analisar meu PC</button>
+                <a class="ghost-btn" id="reportLink" href="/api/report" download>Exportar relatório</a>
+              </div>
             </div>
           </div>
 
@@ -62,44 +67,87 @@
           </div>
           <div id="homeRecommendations" class="recommendation-list empty-state">Faça uma análise para gerar recomendações.</div>
         </section>
+
+        <section class="section-block">
+          <div class="section-title">
+            <div><span class="eyebrow">DIAGNÓSTICO</span><h3>Estado por área</h3></div>
+            <button class="text-btn" data-go="mypc">Ver tudo</button>
+          </div>
+          <div id="homeDomainSummary" class="domain-summary empty-state">Faça uma análise para ver o estado de cada área.</div>
+        </section>
       </section>
 
       <section class="page" id="page-optimize">
-        <header class="page-header compact"><div><span class="eyebrow">OTIMIZAR</span><h1>Plano inteligente</h1><p>Somente ações justificadas pelo estado real desta máquina.</p></div></header>
+        <header class="page-header compact"><div><span class="eyebrow">OTIMIZAR</span><h1>Plano inteligente</h1><p>Somente ações justificadas pelo estado real desta máquina.</p></div>
+          <button class="ghost-btn" id="planButton">Gerar plano do motor</button>
+        </header>
         <div class="optimization-summary">
           <div><strong id="recommendationCount">0</strong><span>recomendações</span></div>
           <div><strong id="blockedCount">0</strong><span>bloqueadas</span></div>
           <div><strong id="okCount">0</strong><span>já corretas</span></div>
         </div>
         <div id="optimizationList" class="recommendation-list empty-state">Nenhum plano gerado ainda.</div>
+
+        <section class="section-block">
+          <div class="section-title"><div><span class="eyebrow">MOTOR DE OTIMIZAÇÃO</span><h3>Diagnóstico formal</h3></div></div>
+          <div id="planPanel" class="plan-panel empty-state">Gere o plano para ver evidências, confiança e bloqueios de cada ação.</div>
+        </section>
       </section>
 
       <section class="page" id="page-performance">
         <header class="page-header compact">
-          <div><span class="eyebrow">DESEMPENHO</span><h1>Observer</h1><p>Veja como a máquina se comporta em tempo real.</p></div>
-          <button class="primary-btn small" id="observerToggle">Iniciar observação</button>
+          <div><span class="eyebrow">DESEMPENHO</span><h1>Observer</h1><p>Telemetria real, amostrada ao vivo no seu Windows.</p></div>
+          <div class="freq-control" id="freqControl">
+            <button class="freq-btn" data-freq="2000">2s</button>
+            <button class="freq-btn active" data-freq="1000">1s</button>
+            <button class="freq-btn" data-freq="0">Pausar</button>
+          </div>
         </header>
         <div class="live-grid">
           <div class="live-card"><span>CPU</span><strong id="liveCpu">—</strong><canvas id="cpuChart" width="480" height="120"></canvas></div>
           <div class="live-card"><span>GPU</span><strong id="liveGpu">—</strong><canvas id="gpuChart" width="480" height="120"></canvas></div>
           <div class="live-card"><span>RAM</span><strong id="liveRam">—</strong><canvas id="ramChart" width="480" height="120"></canvas></div>
-          <div class="live-card"><span>GPU temperatura</span><strong id="liveTemp">—</strong><div class="temperature-orb"><i id="temperatureFill"></i></div></div>
+          <div class="live-card"><span>GPU temperatura</span><strong id="liveTemp">—</strong><canvas id="tempChart" width="480" height="120"></canvas></div>
         </div>
+        <section class="section-block">
+          <div class="section-title">
+            <div><span class="eyebrow">PROCESSOS</span><h3>O que está consumindo agora</h3></div>
+            <span class="section-note" id="processMeta">aguardando amostras…</span>
+          </div>
+          <div class="process-grid">
+            <div class="process-card"><h4>Top CPU</h4><div id="topCpuBox" class="process-box empty-state">Aguardando a segunda amostra para calcular o uso por processo.</div></div>
+            <div class="process-card"><h4>Top memória</h4><div id="topMemBox" class="process-box empty-state">Coletando…</div></div>
+          </div>
+        </section>
       </section>
 
       <section class="page" id="page-mypc">
         <header class="page-header compact"><div><span class="eyebrow">MEU PC</span><h1>Conheça sua máquina</h1><p>Visão simples por padrão; detalhes técnicos quando você quiser.</p></div></header>
         <div id="hardwareHero" class="hardware-hero empty-state">Faça uma análise para identificar o hardware.</div>
-        <div id="hardwareList" class="hardware-list"></div>
+        <div id="domainSummary" class="domain-summary"></div>
+        <div id="domainGrid" class="domain-grid"></div>
+      </section>
+
+      <section class="page" id="page-history">
+        <header class="page-header compact">
+          <div><span class="eyebrow">HISTÓRICO</span><h1>Análises anteriores</h1><p>Cada análise fica registrada no seu disco, com dados reais daquele momento.</p></div>
+          <a class="ghost-btn" href="/api/report" download>Exportar relatório</a>
+        </header>
+        <div id="historyList" class="history-list empty-state">Carregando…</div>
+        <section class="section-block">
+          <div class="section-title"><div><span class="eyebrow">DETALHE</span><h3 id="historyDetailTitle">Selecione uma análise</h3></div></div>
+          <div id="historyDetail" class="empty-state">Nenhuma análise selecionada.</div>
+        </section>
       </section>
 
       <section class="page" id="page-more">
-        <header class="page-header compact"><div><span class="eyebrow">MAIS</span><h1>Central do sistema</h1><p>Atualizações, segurança, inicialização, energia e configurações avançadas.</p></div></header>
+        <header class="page-header compact"><div><span class="eyebrow">MAIS</span><h1>Central do sistema</h1><p>Atualizações, segurança, inicialização, energia e relatórios.</p></div></header>
         <div class="more-grid">
           <button class="more-tile" data-more="updates"><span>↻</span><strong>Windows Update</strong><small>Estado e atualizações pendentes</small></button>
           <button class="more-tile" data-more="startup"><span>⏻</span><strong>Inicialização</strong><small>Programas que iniciam com o Windows</small></button>
-          <button class="more-tile" data-more="security"><span>◇</span><strong>Segurança</strong><small>Defender e Secure Boot</small></button>
-          <button class="more-tile" data-more="power"><span>⚡</span><strong>Energia</strong><small>Planos existentes no Windows</small></button>
+          <button class="more-tile" data-more="security"><span>◇</span><strong>Segurança</strong><small>Defender, Firewall e Secure Boot</small></button>
+          <button class="more-tile" data-more="power"><span>⚡</span><strong>Energia</strong><small>Aplicar plano com consentimento, verificação e histórico</small></button>
+          <button class="more-tile" data-more="report"><span>⤓</span><strong>Relatório</strong><small>Baixar o diagnóstico completo em HTML</small></button>
         </div>
         <div id="morePanel" class="detail-panel">Escolha uma área.</div>
       </section>
@@ -112,6 +160,7 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <script src="/api.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

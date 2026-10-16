@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import secrets
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -12,12 +13,14 @@ from .actions import list_power_plans
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
+from .http_security import REQUEST_TIMEOUT_SECONDS, RequestRejected, read_json_object, validate_request
 from .observer import OBSERVER, OBSERVER_RUNNER
 from .optimization import build_optimization_plan, snapshot_from_payload
 from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
-from .transaction import TransactionEngine
+from .report import build_report_html
+from .transaction import TransactionEngine, TransactionError, TransactionState
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
@@ -82,8 +85,34 @@ def _sync_observer_runner(enabled: bool) -> None:
             APP_LOG.write("observer_stopped")
 
 
+class LocalHTTPServer(ThreadingHTTPServer):
+    def __init__(self, server_address, handler_class):
+        self.api_session_token = secrets.token_urlsafe(32)
+        super().__init__(server_address, handler_class)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ZeusPC/0.1"
+
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+
+    def end_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "same-origin")
+        super().end_headers()
+
+    def authorize(self, *, bootstrap=False):
+        try:
+            validate_request(self, bootstrap=bootstrap)
+        except (RequestRejected, ValueError) as exc:
+            self.close_connection = True
+            self.send_json({"ok": False, "message": str(exc)}, getattr(exc, "status", 400))
+            return False
+        return True
 
     def log_message(self, fmt, *args):
         return
@@ -98,13 +127,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def read_json(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > 65536:
-            raise ValueError("Payload muito grande.")
-        raw = self.rfile.read(length) if length else b"{}"
-        return json.loads(raw.decode("utf-8") or "{}")
+        return read_json_object(self)
 
     def do_GET(self):
+        if not self.authorize(bootstrap=self.path == "/api/session"):
+            return
+        if self.path == "/api/session":
+            return self.send_json({"session_token": self.server.api_session_token})
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -115,8 +144,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
-                "execution_mode": "TransactionFoundation",
-                "enabled_actions": [],
+                "execution_mode": "TransactionExecution",
+                "enabled_actions": TRANSACTIONS.registry.executable_ids(),
                 "preparable_actions": TRANSACTIONS.registry.ids(),
                 "host": HOST,
                 "persistence": {
@@ -144,6 +173,30 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({"scans": DB.recent_scans(limit)})
+        if path.startswith("/api/scan/") and path[len("/api/scan/"):].isdigit():
+            scan = DB.get_scan(int(path[len("/api/scan/"):]))
+            if scan is None:
+                return self.send_json({"error": "Analise nao encontrada."}, 404)
+            return self.send_json(scan)
+        if path == "/api/report":
+            scan_id = query.get("scan_id", [None])[0]
+            if scan_id is None:
+                history = DB.recent_scans(1)
+                scan = history[0] if history else None
+            else:
+                scan = DB.get_scan(scan_id)
+            if scan is None:
+                return self.send_json({"error": "Nenhuma analise encontrada para gerar o relatorio."}, 404)
+            body = build_report_html(scan, version=__version__, build=BUILD).encode("utf-8")
+            filename = f"zeus-pc-relatorio-{scan.get('id', 'atual')}.html"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Disposition", f"attachment; filename={filename}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/api/optimization/plan":
             history = DB.recent_scans(1)
             if not history:
@@ -252,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({
                 "transactions": TRANSACTIONS.recent(limit),
-                "execution_enabled": False,
+                "execution_enabled": True,
             })
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
@@ -276,6 +329,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if not self.authorize():
+            return
         path = urlparse(self.path).path
         try:
             payload = self.read_json()
@@ -353,19 +408,48 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return self.send_json({"transaction": transaction})
 
+            if path == "/api/transactions/execute":
+                transaction_id = str(payload.get("transaction_id") or "")
+                try:
+                    executed = TRANSACTIONS.execute(transaction_id)
+                except TransactionError as exc:
+                    APP_LOG.write(
+                        "transaction_execution_rejected",
+                        level="WARN",
+                        transaction_id=transaction_id,
+                        reason=str(exc),
+                    )
+                    return self.send_json({"ok": False, "message": str(exc)}, 409)
+                verified = executed["state"] == TransactionState.VERIFIED.value
+                APP_LOG.write(
+                    "transaction_executed" if verified else "transaction_execution_failed",
+                    level="INFO" if verified else "WARN",
+                    transaction_id=executed["transaction_id"],
+                    action_id=executed["action_id"],
+                    state=executed["state"],
+                )
+                return self.send_json(
+                    {"transaction": executed, "ok": verified},
+                    200 if verified else 409,
+                )
+
             if path == "/api/actions/power-plan":
                 return self.send_json(
                     {
                         "ok": False,
                         "message": (
                             "Execucao direta desativada. "
-                            "Acoes reais exigirao o Transaction Engine completo."
+                            "Use /api/transactions/prepare, /api/transactions/consent "
+                            "e /api/transactions/execute."
                         ),
                     },
                     409,
                 )
 
             return self.send_json({"error": "Acao bloqueada."}, 404)
+        except RequestRejected as exc:
+            self.close_connection = True
+            return self.send_json({"ok": False, "message": str(exc)}, exc.status)
         except Exception as exc:
             APP_LOG.write(
                 "request_failed",
@@ -390,7 +474,7 @@ def main():
     )
     print(f"Zeus PC {__version__} ({BUILD})")
     print(f"http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = LocalHTTPServer((HOST, PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

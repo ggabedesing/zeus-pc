@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _UNSET = object()
 
 
@@ -73,6 +73,7 @@ class ZeusDatabase:
                     state TEXT NOT NULL,
                     args_json TEXT NOT NULL,
                     before_state_json TEXT NOT NULL,
+                    apply_json TEXT,
                     verify_json TEXT,
                     rollback_json TEXT,
                     error_text TEXT,
@@ -82,6 +83,16 @@ class ZeusDatabase:
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(transaction_journal)"
+                ).fetchall()
+            }
+            if "apply_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE transaction_journal ADD COLUMN apply_json TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_transaction_journal_updated
@@ -178,6 +189,30 @@ class ZeusDatabase:
             for row in rows
         ]
 
+    def get_scan(self, scan_id: int) -> dict[str, Any] | None:
+        try:
+            safe_id = int(scan_id)
+        except (TypeError, ValueError):
+            return None
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, created_at, profile, snapshot_json, recommendations_json
+                FROM scan_history
+                WHERE id = ?
+                """,
+                (safe_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "created_at": row["created_at"],
+            "profile": row["profile"],
+            "snapshot": json.loads(row["snapshot_json"]),
+            "recommendations": json.loads(row["recommendations_json"]),
+        }
+
     def record_transaction(
         self,
         *,
@@ -241,6 +276,8 @@ class ZeusDatabase:
         *,
         updated_at: str,
         state: str | None = None,
+        expected_state: str | None = None,
+        apply: dict[str, Any] | None | object = _UNSET,
         verify: dict[str, Any] | None | object = _UNSET,
         rollback: dict[str, Any] | None | object = _UNSET,
         error_text: str | None | object = _UNSET,
@@ -253,6 +290,19 @@ class ZeusDatabase:
         if state is not None:
             assignments.append("state = ?")
             values.append(state)
+        if apply is not _UNSET:
+            assignments.append("apply_json = ?")
+            values.append(
+                (
+                    json.dumps(
+                        apply,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if apply is not None
+                    else None
+                )
+            )
         if verify is not _UNSET:
             assignments.append("verify_json = ?")
             values.append(
@@ -290,12 +340,17 @@ class ZeusDatabase:
             values.append(consent_consumed_at)
 
         values.append(transaction_id)
+        guard = ""
+        if expected_state is not None:
+            guard = "AND state = ?"
+            values.append(expected_state)
         with self.connect() as connection:
             cursor = connection.execute(
                 f"""
                 UPDATE transaction_journal
                 SET {", ".join(assignments)}
                 WHERE transaction_id = ?
+                {guard}
                 """,
                 values,
             )
@@ -387,6 +442,11 @@ class ZeusDatabase:
             "state": row["state"],
             "args": json.loads(row["args_json"]),
             "before_state": json.loads(row["before_state_json"]),
+            "apply": (
+                json.loads(row["apply_json"])
+                if row["apply_json"]
+                else None
+            ),
             "verify": (
                 json.loads(row["verify_json"])
                 if row["verify_json"]

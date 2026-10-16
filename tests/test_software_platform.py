@@ -54,16 +54,38 @@ class SoftwarePlatformTests(unittest.TestCase):
     @patch("zeus_pc.software_platform.run_json")
     def test_optional_features_counts_enabled(self, run_json, _blocked):
         run_json.return_value = [
-            {"FeatureName": "A", "State": "Enabled"},
-            {"FeatureName": "B", "State": "Disabled"},
-            {"FeatureName": "C", "State": "Enabled"},
+            {"Name": "A", "Caption": "Recurso A", "InstallState": 1},
+            {"Name": "B", "Caption": "Recurso B", "InstallState": 2},
+            {"Name": "C", "Caption": "Recurso C", "InstallState": 1},
+            {"Name": "D", "Caption": "Recurso D", "InstallState": 3},
+            {"Name": "E", "Caption": "Recurso E", "InstallState": 99},
         ]
 
         result = optional_features_probe()
 
+        states = {
+            item["name"]: item["state"]
+            for item in metric(result, "items")
+        }
         self.assertEqual(result.status, Status.OK)
-        self.assertEqual(metric(result, "count"), 3)
+        self.assertEqual(metric(result, "count"), 5)
         self.assertEqual(metric(result, "enabled_count"), 2)
+        self.assertEqual(states["A"], "Enabled")
+        self.assertEqual(states["B"], "Disabled")
+        self.assertEqual(states["D"], "Not Present")
+        self.assertEqual(states["E"], "Unknown")
+
+    @patch("zeus_pc.software_platform._blocked", return_value=None)
+    @patch("zeus_pc.software_platform.run_json")
+    def test_optional_features_reads_cim_without_elevation(self, run_json, _blocked):
+        run_json.return_value = [{"Name": "A", "Caption": "A", "InstallState": 1}]
+
+        result = optional_features_probe()
+
+        script = run_json.call_args[0][0]
+        self.assertIn("Win32_OptionalFeature", script)
+        self.assertNotIn("Get-WindowsOptionalFeature", script)
+        self.assertEqual(result.source, "Win32_OptionalFeature")
 
     @patch("zeus_pc.software_platform._blocked", return_value=None)
     @patch(

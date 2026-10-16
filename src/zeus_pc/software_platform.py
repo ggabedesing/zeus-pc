@@ -2,8 +2,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import Metric, ProbeResult, Status
+from .models import (
+    Metric,
+    ProbeResult,
+    Status,
+    demote_if_unknown,
+    humanize_probe_error,
+)
 from .powershell import run_json
+
+OPTIONAL_FEATURE_STATES = {
+    1: "Enabled",
+    2: "Disabled",
+    3: "Not Present",
+}
 
 
 def _as_list(value: Any) -> list[dict[str, Any]]:
@@ -24,34 +36,6 @@ def _blocked(domain: str) -> ProbeResult | None:
             message="Disponivel apenas no Windows.",
         )
     return None
-
-
-def _error_status(exc: Exception | str) -> Status:
-    text = str(exc).lower()
-    if any(
-        token in text
-        for token in (
-            "access is denied",
-            "acesso negado",
-            "requires elevation",
-            "administrator",
-            "administrador",
-        )
-    ):
-        return Status.REQUIRES_ELEVATION
-    if any(
-        token in text
-        for token in (
-            "is not recognized",
-            "não é reconhecido",
-            "nao e reconhecido",
-            "commandnotfound",
-            "invalid namespace",
-            "namespace inexistente",
-        )
-    ):
-        return Status.UNSUPPORTED
-    return Status.FAILED
 
 
 def installed_software_probe() -> ProbeResult:
@@ -117,10 +101,11 @@ def installed_software_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source)
         return ProbeResult(
             "Installed Software",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
 
@@ -184,10 +169,11 @@ def virtualization_probe() -> ProbeResult:
             source=source,
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source)
         return ProbeResult(
             "Virtualization",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
 
@@ -197,32 +183,45 @@ def optional_features_probe() -> ProbeResult:
     if blocked:
         return blocked
 
-    source = "Get-WindowsOptionalFeature"
+    source = "Win32_OptionalFeature"
     try:
-        features = _as_list(
+        rows = _as_list(
             run_json(
-                "Get-WindowsOptionalFeature -Online | "
-                "Select-Object FeatureName,State",
-                timeout=15,
+                "Get-CimInstance Win32_OptionalFeature | "
+                "Select-Object Name,Caption,InstallState",
+                timeout=20,
             )
         )
-        enabled_count = sum(
-            1 for item in features if str(item.get("State") or "").lower() == "enabled"
-        )
-        return ProbeResult(
-            "Windows Features",
-            Status.OK,
-            [
-                Metric("count", len(features), source=source),
-                Metric("enabled_count", enabled_count, source=source),
-                Metric("items", features, source=source),
-            ],
-            source=source,
+        items = [
+            {
+                "name": item.get("Name"),
+                "caption": item.get("Caption"),
+                "state": OPTIONAL_FEATURE_STATES.get(
+                    item.get("InstallState"),
+                    "Unknown",
+                ),
+            }
+            for item in rows
+        ]
+        enabled_count = sum(1 for item in items if item["state"] == "Enabled")
+        return demote_if_unknown(
+            ProbeResult(
+                "Windows Features",
+                Status.OK,
+                [
+                    Metric("count", len(items), source=source),
+                    Metric("enabled_count", enabled_count, source=source),
+                    Metric("items", items, source=source),
+                ],
+                source=source,
+            ),
+            meaningful=("count", "enabled_count"),
         )
     except Exception as exc:
+        status, message = humanize_probe_error(exc, source, default_status=Status.PARTIAL)
         return ProbeResult(
             "Windows Features",
-            _error_status(exc),
-            message=str(exc),
+            status,
+            message=message,
             source=source,
         )
