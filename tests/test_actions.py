@@ -42,7 +42,9 @@ class ActionValidationTests(unittest.TestCase):
             },
         )()
 
-        plans = list_power_plans()
+        # Exercise the Windows reader even when the test runner is on Linux.
+        with patch("zeus_pc.actions.os.name", "nt"):
+            plans = list_power_plans()
 
         self.assertEqual(len(plans), 1)
         self.assertEqual(

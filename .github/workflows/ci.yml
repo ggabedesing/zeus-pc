@@ -7,18 +7,19 @@ on:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONPATH: src
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Run unit tests
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH="$pwd\src"
-          python -m unittest discover -s tests -v
+        run: python -m unittest discover -s tests -v
       - name: Compile Python
-        shell: pwsh
-        run: |
-          python -m compileall src
+        run: python -m compileall src
