@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _UNSET = object()
 
 
@@ -73,6 +73,7 @@ class ZeusDatabase:
                     state TEXT NOT NULL,
                     args_json TEXT NOT NULL,
                     before_state_json TEXT NOT NULL,
+                    apply_json TEXT,
                     verify_json TEXT,
                     rollback_json TEXT,
                     error_text TEXT,
@@ -88,6 +89,12 @@ class ZeusDatabase:
                 ON transaction_journal(updated_at DESC)
                 """
             )
+            try:
+                connection.execute(
+                    "ALTER TABLE transaction_journal ADD COLUMN apply_json TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass
             connection.execute(
                 """
                 INSERT INTO schema_meta(key, value)
@@ -301,6 +308,76 @@ class ZeusDatabase:
             )
             return cursor.rowcount == 1
 
+    def transition_transaction(
+        self,
+        transaction_id: str,
+        *,
+        from_state: str,
+        to_state: str,
+        updated_at: str,
+        apply_result: dict[str, Any] | None | object = _UNSET,
+        verify: dict[str, Any] | None | object = _UNSET,
+        rollback: dict[str, Any] | None | object = _UNSET,
+        error_text: str | None | object = _UNSET,
+    ) -> bool:
+        assignments = ["state = ?", "updated_at = ?"]
+        values: list[Any] = [to_state, updated_at]
+
+        if apply_result is not _UNSET:
+            assignments.append("apply_json = ?")
+            values.append(
+                (
+                    json.dumps(
+                        apply_result,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if apply_result is not None
+                    else None
+                )
+            )
+        if verify is not _UNSET:
+            assignments.append("verify_json = ?")
+            values.append(
+                (
+                    json.dumps(
+                        verify,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if verify is not None
+                    else None
+                )
+            )
+        if rollback is not _UNSET:
+            assignments.append("rollback_json = ?")
+            values.append(
+                (
+                    json.dumps(
+                        rollback,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    if rollback is not None
+                    else None
+                )
+            )
+        if error_text is not _UNSET:
+            assignments.append("error_text = ?")
+            values.append(error_text)
+
+        values.extend([transaction_id, from_state])
+        with self.connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE transaction_journal
+                SET {", ".join(assignments)}
+                WHERE transaction_id = ? AND state = ?
+                """,
+                values,
+            )
+            return cursor.rowcount == 1
+
     def consume_transaction_consent(
         self,
         transaction_id: str,
@@ -387,6 +464,11 @@ class ZeusDatabase:
             "state": row["state"],
             "args": json.loads(row["args_json"]),
             "before_state": json.loads(row["before_state_json"]),
+            "apply": (
+                json.loads(row["apply_json"])
+                if row["apply_json"]
+                else None
+            ),
             "verify": (
                 json.loads(row["verify_json"])
                 if row["verify_json"]

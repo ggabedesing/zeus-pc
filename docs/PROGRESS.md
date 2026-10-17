@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-08
+Updated: 2026-10-17
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,22 @@ Updated: 2026-10-08
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 014 — Transaction execution lifecycle (SET_ACTIVE_POWER_PLAN only).
+
+Status:
+- branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- ActionDefinition gained optional apply and rollback callables; actions without apply stay prepare/consent only;
+- in-process resource lock per resource_key serializes executions of the same resource;
+- execute() runs CONSENTED → APPLYING → APPLIED → VERIFIED with guarded atomic transitions;
+- independent VERIFY failure triggers automatic rollback to the captured BeforeState;
+- failed APPLY → FAILED without calling verify/rollback; failed rollback → FAILED with explicit error text;
+- execution is single-shot per transaction and requires a consumed one-time consent;
+- SQLite schema upgraded from v2 to v3 with non-destructive apply_json on transaction_journal;
+- POST /api/transactions/execute added; /api/status reports execution_mode TransactionExecution;
+- structured log events transaction_verified, transaction_rolled_back and transaction_failed;
+- 80 unit tests pass locally; waiting for Windows CI before merge.
+
+## Previous increment (013)
 Increment 013 — Transaction Engine foundation.
 
 Status:
@@ -39,7 +55,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 014 — Transaction execution lifecycle for SET_ACTIVE_POWER_PLAN only: resource lock, APPLY, independent VERIFY, journal transitions and automatic rollback on failed verify.
+Increment 015 — either crash recovery for transactions stuck in APPLYING/ROLLING_BACK after restart, or the first expansion of the safe action catalog (startup control with preview, or safe cleanup preview), per ROADMAP order.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

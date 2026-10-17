@@ -115,8 +115,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({
                 "version": __version__,
                 "build": BUILD,
-                "execution_mode": "TransactionFoundation",
-                "enabled_actions": [],
+                "execution_mode": "TransactionExecution",
+                "enabled_actions": TRANSACTIONS.executable_ids(),
                 "preparable_actions": TRANSACTIONS.registry.ids(),
                 "host": HOST,
                 "persistence": {
@@ -252,7 +252,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "limit invalido."}, 400)
             return self.send_json({
                 "transactions": TRANSACTIONS.recent(limit),
-                "execution_enabled": False,
+                "execution_enabled": True,
+                "executable_actions": TRANSACTIONS.executable_ids(),
             })
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
@@ -352,6 +353,29 @@ class Handler(BaseHTTPRequestHandler):
                     action_id=transaction["action_id"],
                 )
                 return self.send_json({"transaction": transaction})
+
+            if path == "/api/transactions/execute":
+                transaction_id = str(payload.get("transaction_id") or "")
+                result = TRANSACTIONS.execute(transaction_id)
+                transaction = result["transaction"]
+                if result["ok"]:
+                    level = "INFO"
+                    event = "transaction_verified"
+                elif transaction["state"] == "ROLLED_BACK":
+                    level = "ERROR"
+                    event = "transaction_rolled_back"
+                else:
+                    level = "ERROR"
+                    event = "transaction_failed"
+                APP_LOG.write(
+                    event,
+                    level=level,
+                    transaction_id=transaction_id,
+                    action_id=transaction["action_id"],
+                    state=transaction["state"],
+                    message=result["message"],
+                )
+                return self.send_json(result)
 
             if path == "/api/actions/power-plan":
                 return self.send_json(

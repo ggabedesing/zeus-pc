@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from typing import Any, Callable
 
-from .actions import GUID_RE, list_power_plans
+from .actions import GUID_RE, list_power_plans, set_power_plan
 from .persistence import ZeusDatabase
 
 
@@ -34,6 +35,8 @@ Validator = Callable[[dict[str, Any]], dict[str, Any]]
 BeforeCapture = Callable[[dict[str, Any]], dict[str, Any]]
 Verifier = Callable[[dict[str, Any]], dict[str, Any]]
 RollbackPreview = Callable[[dict[str, Any]], dict[str, Any] | None]
+Apply = Callable[[dict[str, Any]], dict[str, Any]]
+Rollback = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +49,10 @@ class ActionDefinition:
     capture_before: BeforeCapture
     verify: Verifier
     rollback_preview: RollbackPreview
+    # Execucao real fica opcional: registracoes so preparam/consentem
+    # enquanto apply/rollback nao forem declarados explicitamente.
+    apply: Apply | None = None
+    rollback: Rollback | None = None
 
 
 class ActionRegistry:
@@ -168,6 +175,26 @@ def _power_rollback_preview(
     }
 
 
+def _apply_power_plan(args: dict[str, Any]) -> dict[str, Any]:
+    result = set_power_plan(str(args.get("guid") or "").lower())
+    return {"ok": bool(result.ok), "message": result.message}
+
+
+def _rollback_power_plan(
+    before_state: dict[str, Any],
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    previewed = str(
+        ((plan or {}).get("args") or {}).get("guid") or ""
+    ).lower()
+    captured = str(before_state.get("active_guid") or "").lower()
+    target = previewed if GUID_RE.fullmatch(previewed) else captured
+    if not GUID_RE.fullmatch(target):
+        return {"ok": False, "message": "Estado anterior sem GUID valido."}
+    result = set_power_plan(target)
+    return {"ok": bool(result.ok), "message": result.message}
+
+
 def build_default_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register(
@@ -180,6 +207,8 @@ def build_default_registry() -> ActionRegistry:
             capture_before=_capture_power_before,
             verify=_verify_power_target,
             rollback_preview=_power_rollback_preview,
+            apply=_apply_power_plan,
+            rollback=_rollback_power_plan,
         )
     )
     return registry
@@ -201,6 +230,26 @@ class TransactionEngine:
             max(int(consent_ttl_seconds), 30),
             1800,
         )
+        self._resource_locks: dict[str, threading.Lock] = {}
+        self._resource_locks_guard = threading.Lock()
+
+    def executable_ids(self) -> list[str]:
+        return sorted(
+            item.action_id
+            for item in (
+                self.registry.get(action_id)
+                for action_id in self.registry.ids()
+            )
+            if item is not None and item.apply is not None
+        )
+
+    def _resource_lock(self, resource_key: str) -> threading.Lock:
+        with self._resource_locks_guard:
+            lock = self._resource_locks.get(resource_key)
+            if lock is None:
+                lock = threading.Lock()
+                self._resource_locks[resource_key] = lock
+            return lock
 
     def prepare(
         self,
@@ -293,11 +342,239 @@ class TransactionEngine:
         public = self.database.get_transaction(transaction_id)
         if public is None:
             raise TransactionError("Transacao nao encontrada apos consentimento.")
-        public["execution_enabled"] = False
+        public["execution_enabled"] = public["state"] == TransactionState.CONSENTED.value
         public["message"] = (
-            "Consentimento registrado. A execucao continua bloqueada nesta etapa."
+            "Consentimento registrado. A acao pode ser executada agora."
+            if public["execution_enabled"]
+            else "Consentimento registrado. Execucao indisponivel para esta transacao."
         )
         return public
+
+    @staticmethod
+    def _safe_apply(
+        apply: Apply,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            result = apply(args)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        if not isinstance(result, dict):
+            return {"ok": False, "message": "APPLY retornou resultado invalido."}
+        return result
+
+    @staticmethod
+    def _safe_verify(
+        verify: Verifier,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            result = verify(args)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "message": f"VERIFY indisponivel: {type(exc).__name__}: {exc}",
+            }
+        if not isinstance(result, dict):
+            return {
+                "ok": False,
+                "message": "VERIFY retornou resultado invalido.",
+            }
+        return result
+
+    @staticmethod
+    def _safe_rollback(
+        rollback: Rollback,
+        before_state: dict[str, Any],
+        plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            result = rollback(before_state, plan)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        if not isinstance(result, dict):
+            return {
+                "ok": False,
+                "message": "ROLLBACK retornou resultado invalido.",
+            }
+        return result
+
+    def _execution_result(
+        self,
+        transaction_id: str,
+        *,
+        ok: bool,
+        message: str,
+    ) -> dict[str, Any]:
+        transaction = self.database.get_transaction(transaction_id)
+        if transaction is None:
+            raise TransactionError("Transacao nao encontrada apos execucao.")
+        return {
+            "transaction": transaction,
+            "state": transaction["state"],
+            "ok": ok,
+            "message": message,
+        }
+
+    def execute(self, transaction_id: str) -> dict[str, Any]:
+        transaction = self.database.get_transaction(transaction_id)
+        if transaction is None:
+            raise TransactionError("Transacao nao encontrada.")
+        if transaction["state"] != TransactionState.CONSENTED.value:
+            raise TransactionError(
+                "Execucao permitida apenas logo apos o consentimento unico."
+            )
+
+        definition = self.registry.get(str(transaction["action_id"] or ""))
+        if definition is None:
+            raise TransactionError("Acao nao permitida pelo registro semantico.")
+        if definition.apply is None:
+            raise TransactionError("Execucao nao habilitada para esta acao.")
+        if definition.reversible and definition.rollback is None:
+            raise TransactionError(
+                "Acao reversivel sem estrategia de rollback nao pode ser executada."
+            )
+
+        try:
+            normalized_args = definition.validate_args(transaction["args"])
+        except TransactionError as exc:
+            raise TransactionError(
+                f"Argumentos nao sao mais validos para o estado atual: {exc}"
+            )
+
+        # Lock por recurso: apenas uma transacao executa por recurso por vez.
+        with self._resource_lock(definition.resource_key):
+            started = self.database.transition_transaction(
+                transaction_id,
+                from_state=TransactionState.CONSENTED.value,
+                to_state=TransactionState.APPLYING.value,
+                updated_at=_iso(_utc_now()),
+            )
+            if not started:
+                raise TransactionError(
+                    "Transacao nao esta mais apta para execucao."
+                )
+
+            apply_payload = self._safe_apply(definition.apply, normalized_args)
+            if not apply_payload.get("ok"):
+                message = str(
+                    apply_payload.get("message") or "APPLY falhou."
+                )
+                self.database.transition_transaction(
+                    transaction_id,
+                    from_state=TransactionState.APPLYING.value,
+                    to_state=TransactionState.FAILED.value,
+                    updated_at=_iso(_utc_now()),
+                    apply_result=apply_payload,
+                    error_text=message,
+                )
+                return self._execution_result(
+                    transaction_id,
+                    ok=False,
+                    message=message,
+                )
+
+            applied = self.database.transition_transaction(
+                transaction_id,
+                from_state=TransactionState.APPLYING.value,
+                to_state=TransactionState.APPLIED.value,
+                updated_at=_iso(_utc_now()),
+                apply_result=apply_payload,
+            )
+            if not applied:
+                raise TransactionError(
+                    "Registro da transacao mudou durante o APPLY."
+                )
+
+            # VERIFY e independente do APPLY: relê o estado real do sistema.
+            verify_payload = self._safe_verify(
+                definition.verify,
+                normalized_args,
+            )
+            if verify_payload.get("ok"):
+                verified = self.database.transition_transaction(
+                    transaction_id,
+                    from_state=TransactionState.APPLIED.value,
+                    to_state=TransactionState.VERIFIED.value,
+                    updated_at=_iso(_utc_now()),
+                    verify=verify_payload,
+                )
+                if not verified:
+                    raise TransactionError(
+                        "Registro da transacao mudou durante o VERIFY."
+                    )
+                return self._execution_result(
+                    transaction_id,
+                    ok=True,
+                    message="Execucao aplicada e verificada com sucesso.",
+                )
+
+            # VERIFY falhou: rollback automatico para o BeforeState.
+            rolling_back = self.database.transition_transaction(
+                transaction_id,
+                from_state=TransactionState.APPLIED.value,
+                to_state=TransactionState.ROLLING_BACK.value,
+                updated_at=_iso(_utc_now()),
+                verify=verify_payload,
+                error_text=(
+                    "VERIFY nao confirmou o estado final; rollback iniciado."
+                ),
+            )
+            if not rolling_back:
+                raise TransactionError(
+                    "Registro da transacao mudou antes do rollback."
+                )
+
+            assert definition.rollback is not None  # guarded above
+            rollback_payload = self._safe_rollback(
+                definition.rollback,
+                dict(transaction["before_state"] or {}),
+                dict(transaction.get("rollback") or {}),
+            )
+            if rollback_payload.get("ok"):
+                self.database.transition_transaction(
+                    transaction_id,
+                    from_state=TransactionState.ROLLING_BACK.value,
+                    to_state=TransactionState.ROLLED_BACK.value,
+                    updated_at=_iso(_utc_now()),
+                    rollback=rollback_payload,
+                    error_text=(
+                        "VERIFY falhou; rollback automatico concluido."
+                    ),
+                )
+                return self._execution_result(
+                    transaction_id,
+                    ok=False,
+                    message=(
+                        "VERIFY falhou; o estado anterior foi restaurado."
+                    ),
+                )
+
+            rollback_error = str(
+                rollback_payload.get("message") or "ROLLBACK falhou."
+            )
+            self.database.transition_transaction(
+                transaction_id,
+                from_state=TransactionState.ROLLING_BACK.value,
+                to_state=TransactionState.FAILED.value,
+                updated_at=_iso(_utc_now()),
+                rollback=rollback_payload,
+                error_text=f"VERIFY e ROLLBACK falharam: {rollback_error}",
+            )
+            return self._execution_result(
+                transaction_id,
+                ok=False,
+                message=(
+                    "VERIFY falhou e o rollback nao pôde restaurar o estado "
+                    f"anterior: {rollback_error}"
+                ),
+            )
 
     def verify_target(
         self,

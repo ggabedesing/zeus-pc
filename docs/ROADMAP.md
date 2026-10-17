@@ -22,11 +22,11 @@
 - [ ] Performance Counters
 
 ## Otimização segura
-- [ ] Transaction Engine persistente
-- [ ] Consent token
-- [ ] BeforeState
-- [ ] VERIFY
-- [ ] ROLLBACK
+- [x] Transaction Engine persistente
+- [x] Consent token
+- [x] BeforeState
+- [x] VERIFY
+- [x] ROLLBACK
 - [ ] Action History
 - [ ] Startup controlado
 - [ ] Limpeza segura com preview

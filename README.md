@@ -12,7 +12,8 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Motor inicial de recomendações baseado em evidências.
 - Modo técnico separado da experiência normal.
 - Servidor ligado somente em `127.0.0.1`.
-- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows e validado pelo backend.
+- Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows, executada somente pelo Transaction Engine (prepare → consentimento único → APPLY → VERIFY independente → rollback automático se o VERIFY falhar).
+- Lock por recurso para impedir duas mutações simultâneas no mesmo recurso.
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
 
 ## Como instalar no PC
@@ -42,6 +43,7 @@ src/zeus_pc/
   engine.py       recomendações
   observer.py     telemetria leve
   actions.py      ações semânticas allowlisted
+  transaction.py  prepare, consentimento, execução e rollback
   server.py       API local
 
 web/
@@ -94,7 +96,8 @@ O roadmap inclui:
 - baseline e comparação antes/depois;
 - limpeza segura com preview;
 - startup controlado;
-- Transaction Engine completo com consentimento, verify e rollback;
+- Crash recovery para transações interrompidas;
+- Novas famílias de ação (startup, limpeza segura) com preview;
 - PC Experience para aparência e personalização do Windows.
 
 Veja também `docs/ARCHITECTURE.md` e `docs/ROADMAP.md`.
