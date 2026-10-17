@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import BUILD, __version__
 from .actions import list_power_plans
+from .agent import build_context, validate_plan
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
@@ -255,6 +256,37 @@ class Handler(BaseHTTPRequestHandler):
                 "execution_enabled": True,
                 "executable_actions": TRANSACTIONS.executable_ids(),
             })
+        if path == "/api/agent/context":
+            history = DB.recent_scans(1)
+            if not history:
+                return self.send_json(
+                    {"error": "Faca uma analise primeiro para montar o contexto."},
+                    409,
+                )
+            latest = history[0]
+            profile = query.get("profile", [latest["profile"]])[0]
+            session_id = query.get("session_id", [None])[0]
+            snapshot = snapshot_from_payload(latest["snapshot"])
+            optimization = build_optimization_plan(
+                snapshot,
+                profile,
+                observer_baseline=OBSERVER.baseline(
+                    60,
+                    session_id=session_id,
+                ),
+                process_snapshot=PROCESS_OBSERVER.latest(
+                    session_id=session_id,
+                ),
+            )
+            baseline = OBSERVER.baseline(60, session_id=session_id)
+            context = build_context(
+                profile=profile,
+                snapshot=latest["snapshot"],
+                optimization_plan=optimization.to_dict(),
+                baseline=baseline,
+                source_scan_id=latest["id"],
+            )
+            return self.send_json({"context": context.to_dict()})
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
@@ -353,6 +385,21 @@ class Handler(BaseHTTPRequestHandler):
                     action_id=transaction["action_id"],
                 )
                 return self.send_json({"transaction": transaction})
+
+            if path == "/api/agent/plan":
+                config = load_config(DB)
+                agent_plan = validate_plan(
+                    payload,
+                    registry=TRANSACTIONS.registry,
+                    profile=config.selected_profile,
+                )
+                APP_LOG.write(
+                    "agent_plan_validated",
+                    plan_id=agent_plan.plan_id,
+                    step_count=len(agent_plan.steps),
+                    max_risk=agent_plan.max_risk.value,
+                )
+                return self.send_json({"plan": agent_plan.to_dict()})
 
             if path == "/api/transactions/execute":
                 transaction_id = str(payload.get("transaction_id") or "")

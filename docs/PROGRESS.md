@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-17
+Updated: 2026-10-17 (agent foundation added)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,20 @@ Updated: 2026-10-17
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 015 — Agent foundation: deterministic context + closed-schema planner.
+
+Status:
+- branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- src/zeus_pc/agent/ package created (context.py, planner.py);
+- build_context() produces a deterministic token-bounded digest (hardware, diagnostico, oportunidades, observacao) with a truncated flag;
+- validate_plan() enforces a strict payload schema (1-4 steps, strict keys, registry allowlist, args re-validated by the Transaction Engine validators);
+- steps carry explicit risk (MEDIUM/HIGH) and consent_required=true; plan carries max_risk;
+- prepare_plan() journals steps as PREPARED transactions without executing;
+- GET /api/agent/context (409 without a scan) and POST /api/agent/plan (validation only) added;
+- no model, no network, no third-party dependency in this increment;
+- 90 unit tests pass locally; waiting for GitHub credentials to push both 014 and 015.
+
+## Previous increment (014)
 Increment 014 — Transaction execution lifecycle (SET_ACTIVE_POWER_PLAN only).
 
 Status:
@@ -55,7 +69,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 015 — either crash recovery for transactions stuck in APPLYING/ROLLING_BACK after restart, or the first expansion of the safe action catalog (startup control with preview, or safe cleanup preview), per ROADMAP order.
+Increment 016 — local inference runtime (llama.cpp/GGUF embedded, offline chat consuming build_context()), no API keys; with crash recovery for stuck transactions queued as a parallel backend increment.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

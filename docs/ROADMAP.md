@@ -33,6 +33,15 @@
 - [ ] Otimização de energia contextual
 - [ ] Comparação antes/depois
 
+## Agente local (Zeus Agent)
+- [x] Contexto do agente (digest determinístico orçado em tokens)
+- [x] Planner de schema fechado (allowlist do ActionRegistry + risco/consentimento)
+- [ ] Inferência local embutida (modelo GGUF offline, sem chaves de API)
+- [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
+- [ ] Modos Assessor/Operador com consentimento
+- [ ] Hooks/veto pré-ação e memória de lições (instincts)
+- [ ] Servidor MCP local (Obsidian/Codex)
+
 ## Drivers e atualizações
 - [ ] Inventário de drivers
 - [ ] Discovery de updates

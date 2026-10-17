@@ -15,6 +15,7 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Única ação mutável atualmente presente: seleção de um plano de energia **já existente** no Windows, executada somente pelo Transaction Engine (prepare → consentimento único → APPLY → VERIFY independente → rollback automático se o VERIFY falhar).
 - Lock por recurso para impedir duas mutações simultâneas no mesmo recurso.
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
+- Fundação do agente local: contexto determinístico orçado em tokens (`/api/agent/context`) e planner de schema fechado (`/api/agent/plan`) — sem nuvem, sem chaves de API, sem terceiros.
 
 ## Como instalar no PC
 
@@ -44,6 +45,9 @@ src/zeus_pc/
   observer.py     telemetria leve
   actions.py      ações semânticas allowlisted
   transaction.py  prepare, consentimento, execução e rollback
+  agent/
+    context.py    digest de contexto orçado em tokens
+    planner.py    plano de schema fechado + risco/consentimento
   server.py       API local
 
 web/
