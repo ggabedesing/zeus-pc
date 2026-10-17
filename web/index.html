@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zeus PC</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">Z</div>
+        <div class="brand-copy"><strong>ZEUS</strong><span>PC</span></div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item active" data-page="home"><span>⌂</span><b>Início</b></button>
+        <button class="nav-item" data-page="optimize"><span>⚡</span><b>Otimizar</b></button>
+        <button class="nav-item" data-page="performance"><span>◉</span><b>Desempenho</b></button>
+        <button class="nav-item" data-page="mypc"><span>▣</span><b>Meu PC</b></button>
+        <button class="nav-item" data-page="more"><span>•••</span><b>Mais</b></button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="mini-status"><i></i><span id="buildText">Conectando...</span></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section class="page active" id="page-home">
+        <header class="page-header">
+          <div><span class="eyebrow">ZEUS PC</span><h1>Seu PC, sob controle.</h1><p>Diagnóstico real. Decisões explicadas. Alterações somente quando fazem sentido.</p></div>
+          <button class="ghost-btn" id="technicalToggle">Modo técnico</button>
+        </header>
+
+        <div class="hero-grid">
+          <div class="core-panel">
+            <div class="core-orb" id="coreOrb">
+              <div class="core-ring ring-a"></div>
+              <div class="core-ring ring-b"></div>
+              <div class="core-center">Z</div>
+            </div>
+            <div class="core-copy">
+              <span class="status-pill" id="overallStatus">Pronto para analisar</span>
+              <h2 id="overallTitle">Vamos descobrir o que seu PC realmente precisa.</h2>
+              <p id="overallText">O Zeus não aplica ajustes universais. Primeiro ele mede, depois recomenda.</p>
+              <button class="primary-btn" id="scanButton">Analisar meu PC</button>
+            </div>
+          </div>
+
+          <div class="metric-stack">
+            <div class="metric-row"><span>CPU</span><strong id="cpuMetric">—</strong><div class="meter"><i id="cpuBar"></i></div></div>
+            <div class="metric-row"><span>GPU</span><strong id="gpuMetric">—</strong><div class="meter"><i id="gpuBar"></i></div></div>
+            <div class="metric-row"><span>RAM</span><strong id="ramMetric">—</strong><div class="meter"><i id="ramBar"></i></div></div>
+            <div class="metric-row"><span>GPU temp.</span><strong id="tempMetric">—</strong><div class="meter"><i id="tempBar"></i></div></div>
+          </div>
+        </div>
+
+        <section class="section-block">
+          <div class="section-title">
+            <div><span class="eyebrow">RECOMENDAÇÕES</span><h3>O que merece sua atenção</h3></div>
+            <button class="text-btn" data-go="optimize">Ver tudo</button>
+          </div>
+          <div id="homeRecommendations" class="recommendation-list empty-state">Faça uma análise para gerar recomendações.</div>
+        </section>
+      </section>
+
+      <section class="page" id="page-optimize">
+        <header class="page-header compact"><div><span class="eyebrow">OTIMIZAR</span><h1>Plano inteligente</h1><p>Somente ações justificadas pelo estado real desta máquina.</p></div></header>
+        <div class="optimization-summary">
+          <div><strong id="recommendationCount">0</strong><span>recomendações</span></div>
+          <div><strong id="blockedCount">0</strong><span>bloqueadas</span></div>
+          <div><strong id="okCount">0</strong><span>já corretas</span></div>
+        </div>
+        <div id="optimizationList" class="recommendation-list empty-state">Nenhum plano gerado ainda.</div>
+      </section>
+
+      <section class="page" id="page-performance">
+        <header class="page-header compact">
+          <div><span class="eyebrow">DESEMPENHO</span><h1>Observer</h1><p>Veja como a máquina se comporta em tempo real.</p></div>
+          <button class="primary-btn small" id="observerToggle">Iniciar observação</button>
+        </header>
+        <div class="live-grid">
+          <div class="live-card"><span>CPU</span><strong id="liveCpu">—</strong><canvas id="cpuChart" width="480" height="120"></canvas></div>
+          <div class="live-card"><span>GPU</span><strong id="liveGpu">—</strong><canvas id="gpuChart" width="480" height="120"></canvas></div>
+          <div class="live-card"><span>RAM</span><strong id="liveRam">—</strong><canvas id="ramChart" width="480" height="120"></canvas></div>
+          <div class="live-card"><span>GPU temperatura</span><strong id="liveTemp">—</strong><div class="temperature-orb"><i id="temperatureFill"></i></div></div>
+        </div>
+      </section>
+
+      <section class="page" id="page-mypc">
+        <header class="page-header compact"><div><span class="eyebrow">MEU PC</span><h1>Conheça sua máquina</h1><p>Visão simples por padrão; detalhes técnicos quando você quiser.</p></div></header>
+        <div id="hardwareHero" class="hardware-hero empty-state">Faça uma análise para identificar o hardware.</div>
+        <div id="hardwareList" class="hardware-list"></div>
+      </section>
+
+      <section class="page" id="page-more">
+        <header class="page-header compact"><div><span class="eyebrow">MAIS</span><h1>Central do sistema</h1><p>Atualizações, segurança, inicialização, energia e configurações avançadas.</p></div></header>
+        <div class="more-grid">
+          <button class="more-tile" data-more="updates"><span>↻</span><strong>Windows Update</strong><small>Estado e atualizações pendentes</small></button>
+          <button class="more-tile" data-more="startup"><span>⏻</span><strong>Inicialização</strong><small>Programas que iniciam com o Windows</small></button>
+          <button class="more-tile" data-more="security"><span>◇</span><strong>Segurança</strong><small>Defender e Secure Boot</small></button>
+          <button class="more-tile" data-more="power"><span>⚡</span><strong>Energia</strong><small>Planos existentes no Windows</small></button>
+        </div>
+        <div id="morePanel" class="detail-panel">Escolha uma área.</div>
+      </section>
+
+      <aside class="technical-drawer" id="technicalDrawer">
+        <div class="drawer-head"><div><span class="eyebrow">MODO TÉCNICO</span><h3>Dados brutos</h3></div><button class="icon-btn" id="closeTechnical">×</button></div>
+        <pre id="technicalJson">Nenhum diagnóstico carregado.</pre>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
