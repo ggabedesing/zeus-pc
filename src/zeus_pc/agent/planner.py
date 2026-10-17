@@ -49,7 +49,8 @@ def _iso(value: datetime) -> str:
     return value.isoformat().replace("+00:00", "Z")
 
 
-def _risk_for(action_id: str, registry: ActionRegistry) -> PlanRisk:
+def risk_for_action(action_id: str, registry: ActionRegistry) -> PlanRisk:
+    """Derive an explicit risk level from the registry declaration."""
     definition = registry.get(action_id)
     if definition is None:
         return PlanRisk.HIGH
@@ -158,7 +159,7 @@ def validate_plan(
             )
 
         rationale = str(raw.get("rationale") or "").strip()
-        risk = _risk_for(action_id, registry)
+        risk = risk_for_action(action_id, registry)
         steps.append(
             PlanStep(
                 action_id=action_id,

@@ -53,6 +53,9 @@ class ActionDefinition:
     # enquanto apply/rollback nao forem declarados explicitamente.
     apply: Apply | None = None
     rollback: Rollback | None = None
+    # JSON Schema declarativo dos argumentos, usado pelo catalogo de tools
+    # (MCP/Obsidian/Codex). Nao substitui validate_args na execucao.
+    arg_schema: dict[str, Any] | None = None
 
 
 class ActionRegistry:
@@ -209,6 +212,21 @@ def build_default_registry() -> ActionRegistry:
             rollback_preview=_power_rollback_preview,
             apply=_apply_power_plan,
             rollback=_rollback_power_plan,
+            arg_schema={
+                "type": "object",
+                "properties": {
+                    "guid": {
+                        "type": "string",
+                        "description": (
+                            "GUID exato de um plano de energia existente "
+                            "(powercfg /list)."
+                        ),
+                        "pattern": GUID_RE.pattern,
+                    }
+                },
+                "required": ["guid"],
+                "additionalProperties": False,
+            },
         )
     )
     return registry

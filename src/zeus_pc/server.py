@@ -9,7 +9,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import BUILD, __version__
 from .actions import list_power_plans
-from .agent import build_context, validate_plan
+from .agent import build_context, build_tool_catalog, validate_plan
 from .app_logging import StructuredLog
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .engine import build_recommendations
@@ -287,6 +287,10 @@ class Handler(BaseHTTPRequestHandler):
                 source_scan_id=latest["id"],
             )
             return self.send_json({"context": context.to_dict()})
+        if path == "/api/agent/tools":
+            return self.send_json(
+                build_tool_catalog(TRANSACTIONS.registry).to_dict()
+            )
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):

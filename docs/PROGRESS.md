@@ -16,6 +16,19 @@ Updated: 2026-10-17 (agent foundation added)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 016 — Tool catalog: ToolSpec + JSON Schema + GET /api/agent/tools.
+
+Status:
+- branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- src/zeus_pc/agent/tools.py with ToolParameter/ToolSpec/ToolCatalog;
+- 6 read tools with binding names and JSON Schema parameters;
+- mutation tools generated from the ActionRegistry, published only with a declared arg_schema;
+- ActionDefinition gained optional arg_schema (SET_ACTIVE_POWER_PLAN declares the exact GUID schema);
+- risk_for_action extracted as public API shared by planner and catalog;
+- GET /api/agent/tools returns {version, count, tools[]}; catalog is deterministic and rejects duplicate names;
+- 98 unit tests pass locally; awaiting GitHub credentials to push increments 014-016.
+
+## Previous increment (015)
 Increment 015 — Agent foundation: deterministic context + closed-schema planner.
 
 Status:
@@ -69,7 +82,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 016 — local inference runtime (llama.cpp/GGUF embedded, offline chat consuming build_context()), no API keys; with crash recovery for stuck transactions queued as a parallel backend increment.
+Increment 017 — local MCP server exposing the tool catalog on 127.0.0.1 (Obsidian/Codex) and/or the agent loop resolving read bindings; local inference runtime (llama.cpp/GGUF, offline chat) as increment 018; crash recovery for stuck transactions queued as a parallel backend increment.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

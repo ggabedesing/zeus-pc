@@ -36,6 +36,7 @@
 ## Agente local (Zeus Agent)
 - [x] Contexto do agente (digest determinístico orçado em tokens)
 - [x] Planner de schema fechado (allowlist do ActionRegistry + risco/consentimento)
+- [x] Catálogo de ferramentas (ToolSpec + JSON Schema + /api/agent/tools)
 - [ ] Inferência local embutida (modelo GGUF offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento

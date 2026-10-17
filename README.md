@@ -48,6 +48,7 @@ src/zeus_pc/
   agent/
     context.py    digest de contexto orçado em tokens
     planner.py    plano de schema fechado + risco/consentimento
+    tools.py      catálogo ToolSpec com JSON Schema (/api/agent/tools)
   server.py       API local
 
 web/
