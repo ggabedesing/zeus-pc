@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-18 (walking skeleton runner added)
+Updated: 2026-10-18 (walking skeleton executed on the real Windows PC)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -25,6 +25,13 @@ Status:
 - failed restore is reported as FAILA CRITICA in the step detail; report carries counts and per-step extras (sha256, states, transaction ids);
 - 181 unit tests pass locally (13 new in tests/test_skeleton.py, including real two-transaction switch/restore on a temp DB with a power-plan-like action);
 - CLI smoke: default run reports 4 pulados and exit 0; unknown model reports falha and exit 1.
+
+Real Windows PC run (2026-10-18, Python 3.12.10):
+- 181 unit tests pass on the PC itself;
+- python -m zeus_pc.skeleton → doctor ok (brain_server/models_dir observed), model/serve/invoke pulado (no GGUF), transaction ok: Equilibrado switch + Alto desempenho restore, both VERIFIED, counts {ok:2, falha:0, pulado:3}, exit 0;
+- independent confirmation: powercfg /getactivescheme reports the restored "Alto desempenho" scheme;
+- local server verified on 127.0.0.1:8000 (/api/status schema v4, /, /styles.css, /app.js, /favicon.svg all 200);
+- still pending: llama-server install + a real GGUF download so model/serve/invoke stop skipping.
 
 ## Previous increment (020)
 Increment 020 — API hardening: loopback-only Host, same-origin Origin and JSON Content-Type guards, SQLite WAL, UI polish.
@@ -133,7 +140,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Run the skeleton on the real Windows PC (python -m zeus_pc.skeleton with a real GGUF) — pending user action. Then Increment 022 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
+The skeleton already ran on the real Windows PC (transaction half proven: real powercfg switch + verified restore). Remaining: install llama-server and download a real GGUF so model/serve/invoke run. Then Increment 022 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

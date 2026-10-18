@@ -65,8 +65,27 @@ Regras honestas do relatório:
 - CLI real neste ambiente: execução padrão → 4 `pulado`, exit 0;
   `--model-id NAO_EXISTE` → `falha`, exit 1.
 
+## Execução real no PC Windows (2026-10-18)
+
+Ambiente: Windows 11 (MINGW64), Python 3.12.10 instalado via winget.
+
+- `unittest discover` → **181 testes OK** neste PC;
+- `python -m zeus_pc.skeleton` → relatório:
+  - `doctor` = **ok** (observações: `brain_server` e `models_dir` ausentes);
+  - `model` / `serve` / `invoke` = **pulado** com o motivo exato (sem GGUF);
+  - `transaction` = **ok** — "alternado para Equilibrado e restaurado para
+    Alto desempenho: 2 transações com consentimento real", estados
+    `switch_state=VERIFIED` e `restore_state=VERIFIED`;
+  - `counts` = ok 2, falha 0, pulado 3, **exit 0**;
+- confirmação independente do Windows: `powercfg /getactivescheme` →
+  **Alto desempenho** (o plano original, restaurado pela transação);
+- servidor local: `python -m zeus_pc.server` em `127.0.0.1:8000` responde
+  `/api/status` (schema v4, `execution_mode=TransactionExecution`), `/`,
+  `/styles.css`, `/app.js` e `/favicon.svg` com 200.
+
 ## Pendência (ação do usuário)
 
-Rodar no PC Windows com um GGUF real — é a prova que nenhum sandbox
-faz: download de GB, RAM de verdade, `powercfg` real e o restore
-confirmado pelo Windows.
+Falta a metade do cérebro: instalar o `llama-server` e baixar um GGUF
+real (`--download-url ... --accept-license`) para `model` / `serve` /
+`invoke` deixarem de ser `pulado` — download de GB, RAM de verdade e o
+invoke medido é a prova que nenhum sandbox faz.

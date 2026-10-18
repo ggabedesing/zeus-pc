@@ -44,7 +44,7 @@
 - [x] Benchmark fechado JA/EN/PT alimentando o roteador (medido > declarado)
 - [x] API local endurecida (Host/Origin/Content-Type) + SQLite WAL + 404 customizado
 - [x] Runner do walking skeleton (python -m zeus_pc.skeleton: modelo → serve → invoke → trocar e restaurar plano)
-- [ ] Walking skeleton real no PC Windows (GGUF real, invoke medido, transação revertida)
+- [ ] Walking skeleton real no PC Windows: transação real já executada e revertida no PC (powercfg + restore VERIFIED em 2026-10-18); falta o GGUF real com invoke medido
 - [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento
