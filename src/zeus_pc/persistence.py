@@ -21,17 +21,30 @@ class DatabaseHealth:
 class ZeusDatabase:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self._schema_ready = False
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
+        # Concurrencia real (increment 020): leitores nao bloqueiam o
+        # escritor em WAL e escrituras aguardam em vez de falhar.
+        connection.execute("PRAGMA busy_timeout = 5000")
+        try:
+            connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            pass  # filesystems sem suporte (ex.: rede) caem no journal padrao
         try:
             yield connection
             connection.commit()
         finally:
             connection.close()
+
+    def _ensure_schema(self) -> None:
+        """Initialize once per instance; reads stop rewriting the schema."""
+        if not self._schema_ready:
+            self.initialize()
 
     def initialize(self) -> DatabaseHealth:
         with self.connect() as connection:
@@ -142,6 +155,7 @@ class ZeusDatabase:
                 """,
                 (str(SCHEMA_VERSION),),
             )
+        self._schema_ready = True
         return self.health()
 
     def health(self) -> DatabaseHealth:
@@ -237,7 +251,7 @@ class ZeusDatabase:
         consent_hash: str,
         consent_expires_at: str,
     ) -> None:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             connection.execute(
                 """
@@ -451,7 +465,7 @@ class ZeusDatabase:
         *,
         include_consent_hash: bool = False,
     ) -> dict[str, Any] | None:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             row = connection.execute(
                 """
@@ -472,7 +486,7 @@ class ZeusDatabase:
         self,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        self.initialize()
+        self._ensure_schema()
         safe_limit = min(max(int(limit), 1), 100)
         with self.connect() as connection:
             rows = connection.execute(
@@ -502,7 +516,7 @@ class ZeusDatabase:
         source_url: str = "",
     ) -> None:
         """Register (or re-register) one installed model with its hash."""
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             connection.execute(
                 """
@@ -536,7 +550,7 @@ class ZeusDatabase:
             )
 
     def get_model_install(self, model_id: str) -> dict[str, Any] | None:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             row = connection.execute(
                 "SELECT * FROM model_installs WHERE model_id = ?",
@@ -545,7 +559,7 @@ class ZeusDatabase:
         return self._install_row(row) if row is not None else None
 
     def list_model_installs(self) -> list[dict[str, Any]]:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM model_installs ORDER BY model_id"
@@ -559,7 +573,7 @@ class ZeusDatabase:
         used_at: str | None = None,
     ) -> bool:
         """Mark a model as most recently used (feeds the LRU order)."""
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             cursor = connection.execute(
                 """
@@ -572,7 +586,7 @@ class ZeusDatabase:
             return cursor.rowcount == 1
 
     def delete_model_install(self, model_id: str) -> bool:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             cursor = connection.execute(
                 "DELETE FROM model_installs WHERE model_id = ?",
@@ -593,7 +607,7 @@ class ZeusDatabase:
         fidelity: float,
         score: float,
     ) -> int:
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             cursor = connection.execute(
                 """
@@ -622,7 +636,7 @@ class ZeusDatabase:
         model_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        self.initialize()
+        self._ensure_schema()
         safe_limit = min(max(int(limit), 1), 500)
         query = (
             "SELECT * FROM model_benchmarks"
@@ -645,7 +659,7 @@ class ZeusDatabase:
         Deterministic given the database contents: the newest row per
         language wins, then a plain mean rounded to two decimals.
         """
-        self.initialize()
+        self._ensure_schema()
         with self.connect() as connection:
             rows = connection.execute(
                 """

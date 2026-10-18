@@ -91,6 +91,57 @@ def _sync_observer_runner(enabled: bool) -> None:
             APP_LOG.write("observer_stopped")
 
 
+# --- Guards da API local (increment 020) ----------------------------------
+# DNS rebinding: um site malicioso resolve para 127.0.0.1 e envia Host
+# proprio -> negado. CSRF via navegador: Origin de outra origem ou
+# Content-Type "simples" (text/plain via no-cors) -> negado. Clientes
+# nao-navegadores (curl sem Origin, scripts) continuam funcionando.
+LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "[::1]", "::1"})
+ALLOWED_POST_CONTENT_TYPES = frozenset({"application/json"})
+
+
+def _split_host(value: str) -> str:
+    """Hostname sem porta, preservando o formato colchete do IPv6."""
+    cleaned = str(value or "").strip().lower()
+    if cleaned.startswith("["):
+        end = cleaned.find("]")
+        return cleaned[: end + 1] if end != -1 else cleaned
+    if cleaned.count(":") == 1:
+        return cleaned.rsplit(":", 1)[0]
+    return cleaned
+
+
+def host_is_loopback(host_header: str | None) -> bool:
+    return _split_host(host_header or "") in LOOPBACK_HOSTNAMES
+
+
+def origin_is_loopback(origin: str | None, port: int) -> bool:
+    """Same-origin only: hostname loopback E porta do servidor."""
+    cleaned = str(origin or "").strip().rstrip("/")
+    if not cleaned:
+        return True  # clientes sem navegador nao enviam Origin
+    if "://" not in cleaned:
+        return False
+    scheme, rest = cleaned.split("://", 1)
+    if scheme != "http":
+        return False
+    host_part = rest.split("/", 1)[0]
+    if host_part.startswith("["):
+        end = host_part.find("]")
+        hostname = host_part[: end + 1]
+        has_port = host_part[end + 1 :].startswith(":")
+        origin_port = host_part[end + 2 :] if has_port else ""
+    elif host_part.count(":") == 1:
+        hostname, origin_port = host_part.rsplit(":", 1)
+    else:
+        hostname, origin_port = host_part, ""
+    if hostname not in LOOPBACK_HOSTNAMES:
+        return False
+    if origin_port and origin_port != str(port):
+        return False
+    return True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "ZeusPC/0.1"
 
@@ -113,7 +164,52 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8") or "{}")
 
+    def reject(self, message: str, status: int = 403, reason: str = "guard"):
+        APP_LOG.write(
+            "request_rejected",
+            level="ERROR",
+            path=self.path,
+            reason=reason,
+            status=status,
+        )
+        # Fecha a conexao: o corpo da requisicao pode nao ter sido lido.
+        self.close_connection = True
+        return self.send_json({"ok": False, "message": message}, status)
+
+    def guard_host(self) -> bool:
+        if host_is_loopback(self.headers.get("Host")):
+            return True
+        self.reject(
+            f"Host negado: {self.headers.get('Host')!r} (somente loopback).",
+            reason="host",
+        )
+        return False
+
+    def guard_mutation(self) -> bool:
+        if not self.guard_host():
+            return False
+        port = int(self.server.server_address[1])
+        origin = self.headers.get("Origin")
+        if origin and not origin_is_loopback(origin, port):
+            self.reject(f"Origem negada: {origin!r}.", reason="origin")
+            return False
+        content_type = (
+            self.headers.get("Content-Length")
+        ) and (
+            self.headers.get("Content-Type") or ""
+        ).split(";", 1)[0].strip().lower()
+        if content_type and content_type not in ALLOWED_POST_CONTENT_TYPES:
+            self.reject(
+                "Content-Type deve ser application/json.",
+                status=415,
+                reason="content_type",
+            )
+            return False
+        return True
+
     def do_GET(self):
+        if not self.guard_host():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -325,6 +421,16 @@ class Handler(BaseHTTPRequestHandler):
         if WEB.resolve() not in target.parents and target != WEB.resolve():
             return self.send_error(403)
         if not target.exists() or not target.is_file():
+            not_found = WEB / "404.html"
+            if not_found.is_file():
+                data = not_found.read_bytes()
+                self.send_response(404)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             return self.send_error(404)
         data = target.read_bytes()
         mime = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
@@ -336,6 +442,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if not self.guard_mutation():
+            return
         path = urlparse(self.path).path
         try:
             payload = self.read_json()

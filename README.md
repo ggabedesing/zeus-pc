@@ -18,6 +18,7 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Fundação do agente local: contexto determinístico orçado em tokens (`/api/agent/context`) e planner de schema fechado (`/api/agent/plan`) — sem nuvem, sem chaves de API, sem terceiros.
 - **Cérebro local (Model Hub)**: registro fechado de 7 modelos GGUF (japoneses + multilingue), runtime somente-loopback para `llama-server`, roteador determinístico por tarefa (`GET /api/brain/models`, `GET /api/brain/status`, `POST /api/brain/invoke`) e relatório de saúde `python -m zeus_pc.doctor` — tudo offline.
 - **Gerenciador de modelos**: download/import de GGUF com **aceite de licença registrado** e **hash SHA-256 verificado** (só HTTPS de hosts allowlistados), verificação de tampering (`POST /api/brain/verify`), LRU de disco sob guarda de RAM com preview e confirmação (`GET /api/brain/storage`, `POST /api/brain/prune`) e **benchmark fechado JA/EN/PT** cujas notas alimentam o roteador (medido > declarado).
+- **API local endurecida**: `Host` somente loopback (anti DNS rebinding), `Origin` somente same-origin nas mutações (anti CSRF de navegador) e corpo de `POST` obrigatoriamente `application/json`; rejeições auditadas no log. SQLite em **WAL** com `busy_timeout` para leitores e escritores concorrentes.
 
 ## Como instalar no PC
 

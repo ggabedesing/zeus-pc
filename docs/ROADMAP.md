@@ -42,6 +42,8 @@
 - [x] Download/import de GGUF com hash SHA-256 + aceite de licença (SQLite v4)
 - [x] LRU de storage sob guarda de RAM (preview + confirmação)
 - [x] Benchmark fechado JA/EN/PT alimentando o roteador (medido > declarado)
+- [x] API local endurecida (Host/Origin/Content-Type) + SQLite WAL + 404 customizado
+- [ ] Walking skeleton real no PC Windows (GGUF real, invoke medido, transação revertida)
 - [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento
@@ -66,6 +68,7 @@
 - [ ] OBS awareness
 
 ## PC Experience
+- [x] Polish da UI (favicon, meta description, logo clicável, 404)
 - [ ] Tema do Windows
 - [ ] Wallpaper
 - [ ] Cores

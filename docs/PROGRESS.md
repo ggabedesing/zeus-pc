@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-18 (model manager added)
+Updated: 2026-10-18 (API hardening added)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,18 @@ Updated: 2026-10-18 (model manager added)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 020 — API hardening: loopback-only Host, same-origin Origin and JSON Content-Type guards, SQLite WAL, UI polish.
+
+Status:
+- branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- guards in server.py: Host must be loopback on every method (DNS rebinding), Origin must match loopback + server port on mutations (browser CSRF, incl. Origin: null), body of any POST must be application/json (blocks no-cors text/plain) — rejections close the connection and are audited as request_rejected;
+- non-browser clients keep working (curl with JSON, scripts); app.js only issues GETs so the UI is unaffected;
+- persistence: journal_mode=WAL + busy_timeout=5000 on every connection (fallback when unsupported) and _ensure_schema() so reads no longer rewrite the schema;
+- UI polish: favicon.svg, meta description, descriptive title, clickable logo, custom web/404.html for static routes (API stays JSON 404);
+- 168 unit tests pass locally (15 new in tests/test_api_hardening.py, including guards exercised through the real Handler over HTTP);
+- HTTP smoke verified: Host/Origin/Content-Type rejections (403/403/415), JSON reaching the domain layer, 404 HTML vs JSON, WAL active, 4 audit events.
+
+## Previous increment (019)
 Increment 019 — Model Manager: licensed GGUF install with SHA-256, LRU storage under the RAM guard, JA/EN/PT benchmark feeding the router.
 
 Status:
@@ -110,7 +122,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 020 — agent loop consuming context + brain (models now installed, verified and measured); local MCP server and crash recovery stay queued in parallel.
+Walking skeleton on the real Windows PC: one real GGUF downloaded with hash, one measured invoke, one transaction executed and rolled back for real. Then Increment 021 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.
