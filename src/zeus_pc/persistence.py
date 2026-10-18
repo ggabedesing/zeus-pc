@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 _UNSET = object()
 
 
@@ -95,6 +95,45 @@ class ZeusDatabase:
                 )
             except sqlite3.OperationalError:
                 pass
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS model_installs (
+                    model_id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    license_name TEXT NOT NULL,
+                    license_accepted_at TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    source_url TEXT NOT NULL DEFAULT '',
+                    installed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    last_used_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS model_benchmarks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    elapsed_ms REAL NOT NULL,
+                    prompt_tokens INTEGER NOT NULL,
+                    completion_tokens INTEGER NOT NULL,
+                    tokens_per_s REAL NOT NULL,
+                    fidelity REAL NOT NULL,
+                    score REAL NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_model_benchmarks_model
+                ON model_benchmarks(model_id, id DESC)
+                """
+            )
             connection.execute(
                 """
                 INSERT INTO schema_meta(key, value)
@@ -449,6 +488,217 @@ class ZeusDatabase:
             self._transaction_row(row, include_consent_hash=False)
             for row in rows
         ]
+
+    def record_model_install(
+        self,
+        *,
+        model_id: str,
+        filename: str,
+        license_name: str,
+        license_accepted_at: str,
+        sha256: str,
+        size_bytes: int,
+        source: str,
+        source_url: str = "",
+    ) -> None:
+        """Register (or re-register) one installed model with its hash."""
+        self.initialize()
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO model_installs(
+                    model_id, filename, license_name, license_accepted_at,
+                    sha256, size_bytes, source, source_url, installed_at,
+                    last_used_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, NULL)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    filename = excluded.filename,
+                    license_name = excluded.license_name,
+                    license_accepted_at = excluded.license_accepted_at,
+                    sha256 = excluded.sha256,
+                    size_bytes = excluded.size_bytes,
+                    source = excluded.source,
+                    source_url = excluded.source_url,
+                    installed_at = CURRENT_TIMESTAMP,
+                    last_used_at = NULL
+                """,
+                (
+                    model_id,
+                    filename,
+                    license_name,
+                    license_accepted_at,
+                    sha256,
+                    int(size_bytes),
+                    source,
+                    source_url,
+                ),
+            )
+
+    def get_model_install(self, model_id: str) -> dict[str, Any] | None:
+        self.initialize()
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM model_installs WHERE model_id = ?",
+                (str(model_id or "").strip().upper(),),
+            ).fetchone()
+        return self._install_row(row) if row is not None else None
+
+    def list_model_installs(self) -> list[dict[str, Any]]:
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM model_installs ORDER BY model_id"
+            ).fetchall()
+        return [self._install_row(row) for row in rows]
+
+    def touch_model_used(
+        self,
+        model_id: str,
+        *,
+        used_at: str | None = None,
+    ) -> bool:
+        """Mark a model as most recently used (feeds the LRU order)."""
+        self.initialize()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE model_installs
+                SET last_used_at = COALESCE(?, CURRENT_TIMESTAMP)
+                WHERE model_id = ?
+                """,
+                (used_at, str(model_id or "").strip().upper()),
+            )
+            return cursor.rowcount == 1
+
+    def delete_model_install(self, model_id: str) -> bool:
+        self.initialize()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM model_installs WHERE model_id = ?",
+                (str(model_id or "").strip().upper(),),
+            )
+            return cursor.rowcount == 1
+
+    def record_benchmark(
+        self,
+        *,
+        model_id: str,
+        language: str,
+        task: str,
+        elapsed_ms: float,
+        prompt_tokens: int,
+        completion_tokens: int,
+        tokens_per_s: float,
+        fidelity: float,
+        score: float,
+    ) -> int:
+        self.initialize()
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO model_benchmarks(
+                    model_id, language, task, elapsed_ms, prompt_tokens,
+                    completion_tokens, tokens_per_s, fidelity, score
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(model_id).strip().upper(),
+                    str(language).strip().lower(),
+                    str(task).strip().upper(),
+                    float(elapsed_ms),
+                    int(prompt_tokens),
+                    int(completion_tokens),
+                    float(tokens_per_s),
+                    float(fidelity),
+                    float(score),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def latest_benchmarks(
+        self,
+        model_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        self.initialize()
+        safe_limit = min(max(int(limit), 1), 500)
+        query = (
+            "SELECT * FROM model_benchmarks"
+            " ORDER BY id DESC LIMIT ?"
+        )
+        values: list[Any] = [safe_limit]
+        if model_id:
+            query = (
+                "SELECT * FROM model_benchmarks WHERE model_id = ?"
+                " ORDER BY id DESC LIMIT ?"
+            )
+            values = [str(model_id).strip().upper(), safe_limit]
+        with self.connect() as connection:
+            rows = connection.execute(query, values).fetchall()
+        return [self._benchmark_row(row) for row in rows]
+
+    def benchmark_scores(self) -> dict[str, float]:
+        """Latest score per (model, language), averaged per model.
+
+        Deterministic given the database contents: the newest row per
+        language wins, then a plain mean rounded to two decimals.
+        """
+        self.initialize()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT b.model_id, b.language, b.score
+                FROM model_benchmarks b
+                WHERE b.id = (
+                    SELECT MAX(x.id) FROM model_benchmarks x
+                    WHERE x.model_id = b.model_id
+                      AND x.language = b.language
+                )
+                ORDER BY b.model_id, b.language
+                """
+            ).fetchall()
+        grouped: dict[str, list[float]] = {}
+        for row in rows:
+            grouped.setdefault(row["model_id"], []).append(
+                float(row["score"])
+            )
+        return {
+            model_id: round(sum(values) / len(values), 2)
+            for model_id, values in sorted(grouped.items())
+        }
+
+    @staticmethod
+    def _install_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "model_id": row["model_id"],
+            "filename": row["filename"],
+            "license_name": row["license_name"],
+            "license_accepted_at": row["license_accepted_at"],
+            "sha256": row["sha256"],
+            "size_bytes": int(row["size_bytes"]),
+            "source": row["source"],
+            "source_url": row["source_url"],
+            "installed_at": row["installed_at"],
+            "last_used_at": row["last_used_at"],
+        }
+
+    @staticmethod
+    def _benchmark_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "model_id": row["model_id"],
+            "language": row["language"],
+            "task": row["task"],
+            "created_at": row["created_at"],
+            "elapsed_ms": float(row["elapsed_ms"]),
+            "prompt_tokens": int(row["prompt_tokens"]),
+            "completion_tokens": int(row["completion_tokens"]),
+            "tokens_per_s": float(row["tokens_per_s"]),
+            "fidelity": float(row["fidelity"]),
+            "score": float(row["score"]),
+        }
 
     @staticmethod
     def _transaction_row(

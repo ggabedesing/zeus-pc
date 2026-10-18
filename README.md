@@ -17,6 +17,7 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
 - Fundação do agente local: contexto determinístico orçado em tokens (`/api/agent/context`) e planner de schema fechado (`/api/agent/plan`) — sem nuvem, sem chaves de API, sem terceiros.
 - **Cérebro local (Model Hub)**: registro fechado de 7 modelos GGUF (japoneses + multilingue), runtime somente-loopback para `llama-server`, roteador determinístico por tarefa (`GET /api/brain/models`, `GET /api/brain/status`, `POST /api/brain/invoke`) e relatório de saúde `python -m zeus_pc.doctor` — tudo offline.
+- **Gerenciador de modelos**: download/import de GGUF com **aceite de licença registrado** e **hash SHA-256 verificado** (só HTTPS de hosts allowlistados), verificação de tampering (`POST /api/brain/verify`), LRU de disco sob guarda de RAM com preview e confirmação (`GET /api/brain/storage`, `POST /api/brain/prune`) e **benchmark fechado JA/EN/PT** cujas notas alimentam o roteador (medido > declarado).
 
 ## Como instalar no PC
 
@@ -53,8 +54,10 @@ src/zeus_pc/
   brain/
     registry.py   contrato fechado dos modelos GGUF (ModelSpec)
     runtime.py    llama-server em loopback, RAM e probe /health
-    router.py     roteamento determinístico por tarefa
+    router.py     roteamento determinístico por tarefa (medido > declarado)
     serve.py      sobe o llama-server local (argv puro, sem shell)
+    manager.py    install com hash + licença, verify e LRU sob guarda de RAM
+    benchmark.py  suite fechada JA/EN/PT (fidelidade + velocidade)
   doctor.py       relatório de saúde (python -m zeus_pc.doctor)
   server.py       API local
 

@@ -39,7 +39,9 @@
 - [x] Catálogo de ferramentas (ToolSpec + JSON Schema + /api/agent/tools)
 - [x] Hub de modelos locais (ModelSpec fechado + runtime loopback + roteador determinístico + /api/brain/*)
 - [x] zeus doctor (saúde: banco, powercfg, llama-server, GGUFs e RAM)
-- [ ] Download/benchmark de GGUFs (JA/EN/PT) com hash e aceite de licença
+- [x] Download/import de GGUF com hash SHA-256 + aceite de licença (SQLite v4)
+- [x] LRU de storage sob guarda de RAM (preview + confirmação)
+- [x] Benchmark fechado JA/EN/PT alimentando o roteador (medido > declarado)
 - [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento

@@ -61,6 +61,17 @@ def _file_present(spec: ModelSpec, directory: Path) -> bool:
     return (directory / spec.filename).is_file()
 
 
+def _selection_key(spec: ModelSpec, scores: dict[str, float] | None):
+    """Benchmark score first (when measured), then static quality rank."""
+    score = scores.get(spec.model_id) if scores else None
+    return (
+        0 if score is not None else 1,
+        -(score if score is not None else 0.0),
+        spec.quality_rank,
+        spec.model_id,
+    )
+
+
 def route_task(
     task: ModelTask | str,
     *,
@@ -68,8 +79,13 @@ def route_task(
     models_dir: Path | None = None,
     available_ram_gb: float | None = None,
     model_id: str | None = None,
+    scores: dict[str, float] | None = None,
 ) -> RoutingDecision:
-    """Route a task to one model, or explain why none is usable."""
+    """Route a task to one model, or explain why none is usable.
+
+    scores (from the benchmark suite, increment 019) tie-break above
+    the static quality_rank: measured beats declared, deterministically.
+    """
     try:
         wanted = ModelTask(str(task or "").strip().upper())
     except ValueError as exc:
@@ -110,7 +126,7 @@ def route_task(
         )
 
     # Automatic: every registered model is reported, in id order.
-    chosen: ModelSpec | None = None
+    eligible: list[ModelSpec] = []
     for model_id_sorted in registry.ids():
         spec = registry.get(model_id_sorted)
         if spec is None:  # pragma: no cover - registry invariant
@@ -148,8 +164,13 @@ def route_task(
         considered.append(
             CandidateOutcome(spec.model_id, "ok", "disponivel.")
         )
-        if chosen is None:
-            chosen = spec
+        eligible.append(spec)
+
+    chosen = (
+        min(eligible, key=lambda spec: _selection_key(spec, scores))
+        if eligible
+        else None
+    )
 
     if chosen is None:
         return RoutingDecision(
@@ -162,12 +183,20 @@ def route_task(
             considered=tuple(considered),
         )
 
+    chosen_score = scores.get(chosen.model_id) if scores else None
+    if chosen_score is not None:
+        reason = (
+            f"melhor nota de benchmark {chosen_score} entre os disponiveis "
+            f"para {wanted.value}."
+        )
+    else:
+        reason = (
+            f"melhor rank {chosen.quality_rank} entre os disponiveis "
+            f"para {wanted.value}."
+        )
     return RoutingDecision(
         task=wanted,
         model_id=chosen.model_id,
-        reason=(
-            f"melhor rank {chosen.quality_rank} entre os disponiveis "
-            f"para {wanted.value}."
-        ),
+        reason=reason,
         considered=tuple(considered),
     )

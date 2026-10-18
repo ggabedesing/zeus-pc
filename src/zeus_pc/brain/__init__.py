@@ -21,6 +21,18 @@ from .registry import (
     ModelTask,
     build_default_model_registry,
 )
+from .benchmark import (
+    BENCHMARK_PROMPTS,
+    LANGUAGE_SET,
+    language_fidelity,
+    run_benchmark,
+    score_turn,
+)
+from .manager import (
+    DEFAULT_DISK_BUDGET_GB,
+    ModelManager,
+    sha256_file,
+)
 from .router import CandidateOutcome, RoutingDecision, route_task
 from .runtime import (
     DEFAULT_BASE_URL,
@@ -35,11 +47,15 @@ from .runtime import (
 )
 
 __all__ = [
+    "BENCHMARK_PROMPTS",
     "BrainError",
     "CandidateOutcome",
     "DEFAULT_BASE_URL",
+    "DEFAULT_DISK_BUDGET_GB",
     "DEFAULT_MODEL_REGISTRY",
+    "LANGUAGE_SET",
     "MODEL_CATALOG_VERSION",
+    "ModelManager",
     "ModelRegistry",
     "ModelSpec",
     "ModelTask",
@@ -50,11 +66,15 @@ __all__ = [
     "chat_complete",
     "detect_llama_server",
     "invoke",
+    "language_fidelity",
     "model_path",
     "models_dir",
     "probe_server",
     "route_task",
+    "run_benchmark",
     "runtime_status",
+    "score_turn",
+    "sha256_file",
 ]
 
 
@@ -69,6 +89,7 @@ def invoke(
     max_tokens: int = 512,
     temperature: float = 0.2,
     timeout: float = 120.0,
+    scores: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Route + complete one turn. Fail closed with BrainError reasons."""
     decision = route_task(
@@ -77,6 +98,7 @@ def invoke(
         models_dir=models_dir_path,
         available_ram_gb=available_ram_gb(),
         model_id=model_id,
+        scores=scores,
     )
     if decision.model_id is None:
         raise BrainError(decision.reason)

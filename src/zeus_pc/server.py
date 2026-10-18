@@ -11,7 +11,13 @@ from . import BUILD, __version__
 from .actions import list_power_plans
 from .agent import build_context, build_tool_catalog, validate_plan
 from .app_logging import StructuredLog
-from .brain import DEFAULT_MODEL_REGISTRY, BrainError, invoke
+from .brain import (
+    DEFAULT_MODEL_REGISTRY,
+    BrainError,
+    ModelManager,
+    invoke,
+    run_benchmark,
+)
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .doctor import build_doctor_report
 from .engine import build_recommendations
@@ -297,6 +303,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(DEFAULT_MODEL_REGISTRY.to_dict())
         if path == "/api/brain/status":
             return self.send_json(build_doctor_report(DB))
+        if path == "/api/brain/storage":
+            budget = query.get("budget_gb", [None])[0]
+            try:
+                manager = ModelManager(DB)
+                return self.send_json(
+                    manager.storage_status(
+                        budget_gb=float(budget) if budget else None
+                    )
+                )
+            except BrainError as exc:
+                return self.send_json({"ok": False, "message": str(exc)}, 409)
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
@@ -441,12 +458,16 @@ class Handler(BaseHTTPRequestHandler):
                 if payload.get("temperature") is not None:
                     options["temperature"] = float(payload.get("temperature"))
                 model_id = payload.get("model_id")
+                scores = DB.benchmark_scores()
+                if scores:
+                    options["scores"] = scores
                 result = invoke(
                     str(payload.get("task") or ""),
                     str(payload.get("prompt") or ""),
                     model_id=str(model_id) if model_id else None,
                     **options,
                 )
+                DB.touch_model_used(result["model_id"])
                 APP_LOG.write(
                     "brain_invoked",
                     task=result["task"],
@@ -454,6 +475,84 @@ class Handler(BaseHTTPRequestHandler):
                     elapsed_ms=result["elapsed_ms"],
                 )
                 return self.send_json({"result": result})
+
+            if path == "/api/brain/install":
+                manager = ModelManager(DB)
+                install = manager.install(
+                    str(payload.get("model_id") or ""),
+                    accept_license=bool(payload.get("accept_license")),
+                    url=(
+                        str(payload["url"]) if payload.get("url") else None
+                    ),
+                    source_path=(
+                        str(payload["source_path"])
+                        if payload.get("source_path")
+                        else None
+                    ),
+                    expected_sha256=(
+                        str(payload["expected_sha256"])
+                        if payload.get("expected_sha256")
+                        else None
+                    ),
+                )
+                APP_LOG.write(
+                    "brain_model_installed",
+                    model_id=install["model_id"],
+                    source=install["source"],
+                    size_bytes=install["size_bytes"],
+                )
+                return self.send_json({"install": install}, 201)
+
+            if path == "/api/brain/verify":
+                manager = ModelManager(DB)
+                verification = manager.verify(
+                    str(payload.get("model_id") or "")
+                )
+                APP_LOG.write(
+                    (
+                        "brain_model_verified"
+                        if verification["ok"]
+                        else "brain_model_verify_failed"
+                    ),
+                    level="INFO" if verification["ok"] else "ERROR",
+                    model_id=verification["model_id"],
+                    status=verification["status"],
+                )
+                return self.send_json({"verification": verification})
+
+            if path == "/api/brain/benchmark":
+                languages = payload.get("languages")
+                kwargs: dict = {}
+                if isinstance(languages, list) and languages:
+                    kwargs["languages"] = tuple(
+                        str(item) for item in languages
+                    )
+                benchmark = run_benchmark(
+                    str(payload.get("model_id") or ""),
+                    database=DB,
+                    **kwargs,
+                )
+                APP_LOG.write(
+                    "brain_benchmark_completed",
+                    model_id=benchmark["model_id"],
+                    score=benchmark["score"],
+                    prompt_count=benchmark["prompt_count"],
+                )
+                return self.send_json({"benchmark": benchmark})
+
+            if path == "/api/brain/prune":
+                manager = ModelManager(DB)
+                budget = payload.get("budget_gb")
+                result = manager.prune(
+                    budget_gb=float(budget) if budget is not None else None,
+                    confirm=bool(payload.get("confirm")),
+                )
+                APP_LOG.write(
+                    "brain_models_pruned",
+                    removed=len(result["removed"]),
+                    freed_gb=result["freed_gb"],
+                )
+                return self.send_json({"prune": result})
 
             if path == "/api/actions/power-plan":
                 return self.send_json(

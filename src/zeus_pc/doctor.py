@@ -20,6 +20,7 @@ from .brain import (
     models_dir,
     runtime_status,
 )
+from .brain.manager import ModelManager
 from .brain.runtime import model_path
 from .persistence import ZeusDatabase
 
@@ -117,6 +118,59 @@ def build_doctor_report(
         }
     )
 
+    # 5. Managed storage: tracked installs with recorded hashes
+    storage: dict[str, Any] = {"tracked_count": 0, "installs": []}
+    if database is not None:
+        try:
+            manager = ModelManager(database, registry=registry)
+            storage = manager.storage_status()
+            tracked = storage["tracked_count"]
+            missing = sum(
+                1 for item in storage["installs"] if not item["present"]
+            )
+            checks.append(
+                {
+                    "name": "model_storage",
+                    "ok": missing == 0,
+                    "detail": (
+                        f"{tracked} rastreados, {storage['used_gb']} GB "
+                        f"em {directory}"
+                        + (
+                            f" ({missing} rastreados sem arquivo)"
+                            if missing
+                            else ""
+                        )
+                    ),
+                }
+            )
+        except Exception as exc:
+            checks.append(
+                {
+                    "name": "model_storage",
+                    "ok": False,
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            )
+
+    # 6. Benchmarks: which models have measured scores
+    scores: dict[str, float] = {}
+    if database is not None:
+        try:
+            scores = database.benchmark_scores()
+        except Exception:
+            scores = {}
+    checks.append(
+        {
+            "name": "brain_benchmarks",
+            "ok": True,
+            "detail": (
+                f"{len(scores)} modelos com nota medida"
+                if scores
+                else "nenhum modelo medido ainda (POST /api/brain/benchmark)"
+            ),
+        }
+    )
+
     return {
         "checks": checks,
         "ok": all(check["ok"] for check in checks),
@@ -124,6 +178,8 @@ def build_doctor_report(
         "runtime": runtime.to_dict(),
         "installed_models": installed,
         "registered_models": len(model_states),
+        "storage": storage,
+        "benchmark_scores": scores,
     }
 
 

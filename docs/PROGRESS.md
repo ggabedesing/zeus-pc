@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-17 (brain foundation added)
+Updated: 2026-10-18 (model manager added)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,10 +16,23 @@ Updated: 2026-10-17 (brain foundation added)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
-Increment 018 — Brain foundation: Zeus Model Hub (registry + runtime + router + doctor).
+Increment 019 — Model Manager: licensed GGUF install with SHA-256, LRU storage under the RAM guard, JA/EN/PT benchmark feeding the router.
 
 Status:
 - branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- SQLite schema v4: model_installs (license acceptance, sha256, source, last_used_at) and model_benchmarks (per-turn metrics); benchmark_scores() = latest row per (model, language), averaged;
+- brain/manager.py: ModelManager with mandatory license acceptance recorded in SQLite; HTTPS download limited to an allowlisted host set, streamed to .part, SHA-256 verified before rename (mismatch leaves nothing); local import copies without touching the user's file; verify detects tampering (ok/alterado/ausente/nao_rastreado);
+- LRU under RAM guard: keep order = fits RAM first, then most recently used (touched on every successful invoke), model_id tie-break; over-budget models become eviction candidates with exact reasons (memoria/lru); prune only deletes manager-tracked files and only with explicit confirmation;
+- brain/benchmark.py: closed 6-prompt suite (2 per language ja/en/pt), language-fidelity score (60%) + throughput saturating at a 20 tok/s CPU reference (40%); every turn journaled;
+- router tie-break: measured benchmark score beats the static quality_rank deterministically (medido > declarado); invoke passes scores and touches the LRU;
+- API: POST /api/brain/install (license gate, 409 with exact reason), POST /api/brain/verify, GET /api/brain/storage (installs + LRU plan + scores), POST /api/brain/prune (confirm required), POST /api/brain/benchmark; invoke now routes with measured scores;
+- doctor: new model_storage and brain_benchmarks checks plus storage/benchmark_scores blocks;
+- 153 unit tests pass locally (33 new in tests/test_model_manager.py); two old schema assertions fixed in intent (assertGreaterEqual(SCHEMA_VERSION, 3)); HTTP smoke validated the full install → benchmark → invoke-with-scores → LRU touch cycle against a loopback OpenAI-compatible stub.
+
+## Previous increment (018)
+Increment 018 — Brain foundation: Zeus Model Hub (registry + runtime + router + doctor).
+
+Status:
 - src/zeus_pc/brain/ package created (registry.py, runtime.py, router.py, serve.py);
 - ModelSpec/ModelRegistry closed schema (mandatory license, languages, strengths, RAM/context budgets) with 7 curated GGUF models: ELYZA_JP_8B, QWEN25_7B (the only PT/multilingual reference), SWALLOW_7B, LLM_JP_1_8B, STABLELM_JP_7B, RINNA_3_6B, SARASHINA2_7B;
 - loopback-only runtime: llama-server detection (ZEUS_LLAMA_SERVER/PATH), RAM budgets (Win32/POSIX), /health probe tolerant of the loading 503, OpenAI-compatible chat_complete with prompt/token caps, non-loopback URLs rejected fail-closed;
@@ -28,7 +41,7 @@ Status:
 - python -m zeus_pc.doctor prints a JSON report (persistence, powercfg, brain server, models dir with present/fits_ram per model);
 - GET /api/brain/models (pure declaration), GET /api/brain/status (doctor report), POST /api/brain/invoke (409 with the exact routing/runtime reason);
 - serve helper builds an argv list bound to 127.0.0.1 — no shell strings anywhere;
-- 120 unit tests pass locally; increments 014-016 already on origin/main with Windows CI green (run 39077102802).
+- 120 unit tests passed; Windows CI green on commit 1086277.
 
 ## Previous increment (016)
 Increment 016 — Tool catalog: ToolSpec + JSON Schema + GET /api/agent/tools.
@@ -97,7 +110,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Increment 019 — multi-model manager: GGUF download with hash verification + license acceptance (SQLite v4), LRU load/unload under the RAM guard, JA/EN/PT benchmark suite whose scores feed the router. Then 020: the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
+Increment 020 — agent loop consuming context + brain (models now installed, verified and measured); local MCP server and crash recovery stay queued in parallel.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.
