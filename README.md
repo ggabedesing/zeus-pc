@@ -35,6 +35,17 @@ Depois abra:
 
 `http://127.0.0.1:8000`
 
+Para provar o ciclo completo no PC (modelo → servidor → invoke medido →
+trocar e restaurar plano de energia com consentimento real):
+
+```powershell
+python -m zeus_pc.skeleton --model-id LLM_JP_1_8B `
+  --download-url <url-do-gguf> --accept-license
+```
+
+O relatório JSON diz o que passou, o que falhou e o que foi pulado;
+exit code 1 somente quando algo falhou.
+
 > O repositório é privado. O Git no seu PC precisa estar autenticado no GitHub.
 
 ## Estrutura
@@ -60,6 +71,7 @@ src/zeus_pc/
     manager.py    install com hash + licença, verify e LRU sob guarda de RAM
     benchmark.py  suite fechada JA/EN/PT (fidelidade + velocidade)
   doctor.py       relatório de saúde (python -m zeus_pc.doctor)
+  skeleton.py     walking skeleton: modelo → serve → invoke → trocar e restaurar plano
   server.py       API local
 
 web/

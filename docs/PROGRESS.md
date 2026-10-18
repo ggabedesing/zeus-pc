@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-18 (API hardening added)
+Updated: 2026-10-18 (walking skeleton runner added)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,17 @@ Updated: 2026-10-18 (API hardening added)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 021 — Walking skeleton runner: one command proving the full real cycle on Windows.
+
+Status:
+- branch: freebuff/0a766cbf2b57fadb3e6fa501;
+- src/zeus_pc/skeleton.py + `python -m zeus_pc.skeleton` CLI: fixed step order doctor → model (license-gated install + SHA-256 verify) → serve (llama-server subprocess, argv only, /health wait, always terminated) → invoke (one measured turn) → transaction (switch power plan and restore the original, both through prepare → consent → execute);
+- every step ends ok | falha | pulado with the exact reason; dependent steps skip when a prerequisite did; exceptions become failures (_safe_step), never tracebacks; exit code 1 only on falha;
+- failed restore is reported as FAILA CRITICA in the step detail; report carries counts and per-step extras (sha256, states, transaction ids);
+- 181 unit tests pass locally (13 new in tests/test_skeleton.py, including real two-transaction switch/restore on a temp DB with a power-plan-like action);
+- CLI smoke: default run reports 4 pulados and exit 0; unknown model reports falha and exit 1.
+
+## Previous increment (020)
 Increment 020 — API hardening: loopback-only Host, same-origin Origin and JSON Content-Type guards, SQLite WAL, UI polish.
 
 Status:
@@ -122,7 +133,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-Walking skeleton on the real Windows PC: one real GGUF downloaded with hash, one measured invoke, one transaction executed and rolled back for real. Then Increment 021 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
+Run the skeleton on the real Windows PC (python -m zeus_pc.skeleton with a real GGUF) — pending user action. Then Increment 022 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.
