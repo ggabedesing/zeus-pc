@@ -37,7 +37,10 @@
 - [x] Contexto do agente (digest determinístico orçado em tokens)
 - [x] Planner de schema fechado (allowlist do ActionRegistry + risco/consentimento)
 - [x] Catálogo de ferramentas (ToolSpec + JSON Schema + /api/agent/tools)
-- [ ] Inferência local embutida (modelo GGUF offline, sem chaves de API)
+- [x] Hub de modelos locais (ModelSpec fechado + runtime loopback + roteador determinístico + /api/brain/*)
+- [x] zeus doctor (saúde: banco, powercfg, llama-server, GGUFs e RAM)
+- [ ] Download/benchmark de GGUFs (JA/EN/PT) com hash e aceite de licença
+- [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento
 - [ ] Hooks/veto pré-ação e memória de lições (instincts)

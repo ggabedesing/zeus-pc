@@ -16,6 +16,7 @@ Esta versão foi recriada do zero no GitHub para eliminar a bagunça estrutural 
 - Lock por recurso para impedir duas mutações simultâneas no mesmo recurso.
 - Nenhum executor genérico de PowerShell ou shell exposto pela API.
 - Fundação do agente local: contexto determinístico orçado em tokens (`/api/agent/context`) e planner de schema fechado (`/api/agent/plan`) — sem nuvem, sem chaves de API, sem terceiros.
+- **Cérebro local (Model Hub)**: registro fechado de 7 modelos GGUF (japoneses + multilingue), runtime somente-loopback para `llama-server`, roteador determinístico por tarefa (`GET /api/brain/models`, `GET /api/brain/status`, `POST /api/brain/invoke`) e relatório de saúde `python -m zeus_pc.doctor` — tudo offline.
 
 ## Como instalar no PC
 
@@ -49,6 +50,12 @@ src/zeus_pc/
     context.py    digest de contexto orçado em tokens
     planner.py    plano de schema fechado + risco/consentimento
     tools.py      catálogo ToolSpec com JSON Schema (/api/agent/tools)
+  brain/
+    registry.py   contrato fechado dos modelos GGUF (ModelSpec)
+    runtime.py    llama-server em loopback, RAM e probe /health
+    router.py     roteamento determinístico por tarefa
+    serve.py      sobe o llama-server local (argv puro, sem shell)
+  doctor.py       relatório de saúde (python -m zeus_pc.doctor)
   server.py       API local
 
 web/

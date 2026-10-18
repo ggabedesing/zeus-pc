@@ -11,7 +11,9 @@ from . import BUILD, __version__
 from .actions import list_power_plans
 from .agent import build_context, build_tool_catalog, validate_plan
 from .app_logging import StructuredLog
+from .brain import DEFAULT_MODEL_REGISTRY, BrainError, invoke
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
+from .doctor import build_doctor_report
 from .engine import build_recommendations
 from .observer import OBSERVER, OBSERVER_RUNNER
 from .optimization import build_optimization_plan, snapshot_from_payload
@@ -291,6 +293,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(
                 build_tool_catalog(TRANSACTIONS.registry).to_dict()
             )
+        if path == "/api/brain/models":
+            return self.send_json(DEFAULT_MODEL_REGISTRY.to_dict())
+        if path == "/api/brain/status":
+            return self.send_json(build_doctor_report(DB))
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
         if path.startswith("/api/"):
@@ -428,6 +434,27 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return self.send_json(result)
 
+            if path == "/api/brain/invoke":
+                options: dict = {}
+                if payload.get("max_tokens") is not None:
+                    options["max_tokens"] = int(payload.get("max_tokens"))
+                if payload.get("temperature") is not None:
+                    options["temperature"] = float(payload.get("temperature"))
+                model_id = payload.get("model_id")
+                result = invoke(
+                    str(payload.get("task") or ""),
+                    str(payload.get("prompt") or ""),
+                    model_id=str(model_id) if model_id else None,
+                    **options,
+                )
+                APP_LOG.write(
+                    "brain_invoked",
+                    task=result["task"],
+                    model_id=result["model_id"],
+                    elapsed_ms=result["elapsed_ms"],
+                )
+                return self.send_json({"result": result})
+
             if path == "/api/actions/power-plan":
                 return self.send_json(
                     {
@@ -441,6 +468,14 @@ class Handler(BaseHTTPRequestHandler):
                 )
 
             return self.send_json({"error": "Acao bloqueada."}, 404)
+        except BrainError as exc:
+            APP_LOG.write(
+                "brain_rejected",
+                level="ERROR",
+                path=path,
+                error=str(exc),
+            )
+            return self.send_json({"ok": False, "message": str(exc)}, 409)
         except Exception as exc:
             APP_LOG.write(
                 "request_failed",
