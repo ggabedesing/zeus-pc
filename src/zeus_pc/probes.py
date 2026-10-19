@@ -13,7 +13,7 @@ from .platform_inventory import firewall_probe, network_link_probe, proxy_probe,
 from .storage_health import physical_storage_probe, storage_reliability_probe, trim_probe, windows_event_summary_probe
 from .software_platform import installed_software_probe, optional_features_probe, virtualization_probe
 from .models import Metric, ProbeResult, Status
-from .powershell import run, run_json
+from .powershell import _decode_output, run, run_json
 
 CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -173,12 +173,13 @@ def power_probe() -> ProbeResult:
     if blocked:
         return blocked
     try:
-        proc = subprocess.run(["powercfg", "/getactivescheme"], capture_output=True, text=True, timeout=3, creationflags=CREATE_NO_WINDOW)
+        proc = subprocess.run(["powercfg", "/getactivescheme"], capture_output=True, timeout=3, creationflags=CREATE_NO_WINDOW)
         if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "Falha ao consultar powercfg")
-        guid_match = re.search(r"([0-9a-fA-F-]{36})", proc.stdout)
+            raise RuntimeError(_decode_output(proc.stderr).strip() or "Falha ao consultar powercfg")
+        scheme = _decode_output(proc.stdout).strip()
+        guid_match = re.search(r"([0-9a-fA-F-]{36})", scheme)
         return ProbeResult("Power", Status.OK, [
-            Metric("active_scheme", proc.stdout.strip(), source="powercfg /getactivescheme"),
+            Metric("active_scheme", scheme, source="powercfg /getactivescheme"),
             Metric("active_guid", guid_match.group(1).lower() if guid_match else None, source="powercfg /getactivescheme"),
         ], source="powercfg")
     except Exception as exc:

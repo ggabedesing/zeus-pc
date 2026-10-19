@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-18 (walking skeleton executed on the real Windows PC)
+Updated: 2026-10-18 (desktop UI overhaul + honest PowerShell decoding)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,18 @@ Updated: 2026-10-18 (walking skeleton executed on the real Windows PC)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 022 — Desktop UI overhaul (readable, no raw JSON) + honest PowerShell output decoding.
+
+Status:
+- web/index.html + web/styles.css rewritten desktop-first: fixed 216px sidebar, dense system-tool typography, five pages (Painel, Meu PC, Desempenho, Otimizar, Sistema); the mobile bottom bar only appears below 760px;
+- zero JSON.stringify in the normal flow — every probe renders as label→value pairs (pt-BR labels, formatted /Date(..)/ dates, bytes in GB, booleans as Sim/Não, lists summarized with "+N outros"); raw JSON stays only behind the opt-in "Modo técnico" drawer;
+- home opens with the last scan from /api/history (verdict, 6 machine chips, recommendations, brain status from doctor) instead of an empty screen; live CPU/GPU/RAM/temp polling at 3s;
+- "Meu PC" groups 30 domains into 6 sections; "Otimizar" translates blockers/benefit/risk/confidence to Portuguese; "Sistema" tiles render label→value rows;
+- backend fix: powershell.py run() captures bytes and _decode_output() tries UTF-8 → console OEM (GetOEMCP) → ANSI → latin-1; actions.py (list_power_plans/set_power_plan) and probes.py (power_probe) no longer use text=True — powercfg wrote cp850 (á=0xA0) while text mode read ANSI (0xA0=NBSP), so "Desempenho Máximo" reached the API as "Desempenho M\xa0ximo";
+- 187 unit tests pass (6 new in tests/test_powershell_decoding.py); compileall OK;
+- real proof: GET /api/power-plans assert "Desempenho Máximo" (codepoint 0xe1) passes on the restarted server; browser DOM check: 0 <pre> across all 5 pages, 30 domain cards, plan counts 1/0/0/0, clean console with 9× sample 200.
+
+## Previous increment (021)
 Increment 021 — Walking skeleton runner: one command proving the full real cycle on Windows.
 
 Status:
@@ -140,7 +152,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-The skeleton already ran on the real Windows PC (transaction half proven: real powercfg switch + verified restore). Remaining: install llama-server and download a real GGUF so model/serve/invoke run. Then Increment 022 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
+The skeleton already ran on the real Windows PC (transaction half proven: real powercfg switch + verified restore). Remaining: install llama-server and download a real GGUF so model/serve/invoke run. Then Increment 023 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

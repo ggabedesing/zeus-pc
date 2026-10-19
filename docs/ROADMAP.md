@@ -45,6 +45,7 @@
 - [x] API local endurecida (Host/Origin/Content-Type) + SQLite WAL + 404 customizado
 - [x] Runner do walking skeleton (python -m zeus_pc.skeleton: modelo → serve → invoke → trocar e restaurar plano)
 - [ ] Walking skeleton real no PC Windows: transação real já executada e revertida no PC (powercfg + restore VERIFIED em 2026-10-18); falta o GGUF real com invoke medido
+- [x] Painel desktop legível (Increment 022): sem JSON no fluxo, veredito na tela inicial, domínios agrupados + decodificação honesta do powercfg (OEM)
 - [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento
@@ -70,6 +71,7 @@
 
 ## PC Experience
 - [x] Polish da UI (favicon, meta description, logo clicável, 404)
+- [x] Redesign desktop do painel (sidebar fixa, cards densos, sem JSON cru — Increment 022)
 - [ ] Tema do Windows
 - [ ] Wallpaper
 - [ ] Cores
