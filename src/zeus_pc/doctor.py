@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 import shutil
-from pathlib import Path
 from typing import Any
 
+from .app_paths import data_dir
 from .brain import (
     DEFAULT_MODEL_REGISTRY,
     ModelRegistry,
@@ -184,8 +184,7 @@ def build_doctor_report(
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parents[2]
-    database = ZeusDatabase(root / "data" / "zeus.db")
+    database = ZeusDatabase(data_dir() / "zeus.db")
     database.initialize()
     report = build_doctor_report(database)
     print(json.dumps(report, ensure_ascii=False, indent=2))

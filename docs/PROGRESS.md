@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-18 (desktop UI overhaul + honest PowerShell decoding)
+Updated: 2026-10-20 (packaging: ZeusPC.exe + Inno Setup installer)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,17 @@ Updated: 2026-10-18 (desktop UI overhaul + honest PowerShell decoding)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 023 — Packaging: ZeusPC.exe (onefile) + Inno Setup installer (per-user, no UAC).
+
+Status:
+- app_paths.py resolves dev vs frozen paths: web/ from the PyInstaller bundle, data/ in %LOCALAPPDATA%\ZeusPC\data (ZEUS_DATA_DIR override everywhere); wired into server/doctor/skeleton/brain.runtime;
+- server.py exposes create_server()/finalize_server(); launcher.py serves the HTTP loop in a thread, waits for /api/status, opens the browser and shows the Tk status window (single instance reopens the browser and exits 0), redirecting stdio/tracebacks to data/zeus-launcher.log when windowed;
+- packaging/make_icon.py generates the brand .ico with stdlib only (DIB 16/32/48/256); PyInstaller one-file windowed build with web/ bundled -> dist/ZeusPC.exe (12.6 MB);
+- packaging/zeus-pc.iss (Inno Setup 6.7.3, user scope): {localappdata}\Programs\ZeusPC, Brazilian Portuguese UI, optional desktop/Startup tasks (unchecked), uninstall keeps the data directory -> dist/ZeusPC-Setup-0.1.0.exe (14.3 MB);
+- 204 unit tests pass (17 new: test_app_paths x8, test_launcher x9); compileall OK;
+- real proof: EXE boots -> /api/status 200, bundle UI served, data written to LOCALAPPDATA, GET /api/scan 200 in 33s with persisted history, single-instance exit 0; full installer cycle install -> run (200) -> uninstall (files/shortcuts/registry removed, data preserved, no leftover process).
+
+## Previous increment (022)
 Increment 022 — Desktop UI overhaul (readable, no raw JSON) + honest PowerShell output decoding.
 
 Status:
@@ -152,7 +163,7 @@ Status:
 - waiting for Windows CI validation before merge.
 
 ## Next increment
-The skeleton already ran on the real Windows PC (transaction half proven: real powercfg switch + verified restore). Remaining: install llama-server and download a real GGUF so model/serve/invoke run. Then Increment 023 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel.
+The skeleton already ran on the real Windows PC (transaction half proven: real powercfg switch + verified restore). Remaining: install llama-server and download a real GGUF so model/serve/invoke run. Then Increment 024 — the agent loop consuming context + brain; local MCP server and crash recovery stay queued in parallel. New product direction (2026-10-20): feature parity with the IObit suite — Driver Booster first (roadmap "Drivers e atualizações": inventory groundwork exists via drivers.unsigned-review.v1, discovery/outdated detection next), then Advanced SystemCare-style utilities.
 
 ## Later order
 1. Complete Transaction Engine execution/rollback/crash recovery.

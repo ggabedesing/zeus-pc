@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse
 from . import BUILD, __version__
 from .actions import list_power_plans
 from .agent import build_context, build_tool_catalog, validate_plan
+from .app_paths import data_dir, web_dir
 from .app_logging import StructuredLog
 from .brain import (
     DEFAULT_MODEL_REGISTRY,
@@ -28,9 +29,10 @@ from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
 from .transaction import TransactionEngine
 
-ROOT = Path(__file__).resolve().parents[2]
-WEB = ROOT / "web"
-DATA = ROOT / "data"
+# Caminhos frozen-aware: no EXE, web/ vem do bundle e data/ fica em
+# %LOCALAPPDATA%\ZeusPC\data (ver app_paths.py).
+WEB = web_dir()
+DATA = data_dir()
 DB = ZeusDatabase(DATA / "zeus.db")
 APP_LOG = StructuredLog(DATA / "zeus-app.jsonl", max_entries=2000)
 TRANSACTIONS = TransactionEngine(DB)
@@ -693,7 +695,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": False, "message": str(exc)}, 400)
 
 
-def main():
+def create_server() -> ThreadingHTTPServer:
+    """Prepara dados/config e devolve o servidor, sem entrar no loop.
+
+    Compartilhado entre `python -m zeus_pc.server` e o launcher do EXE
+    (Increment 023), que serve em um thread e precisa do objeto para
+    derrubar o loop na saída.
+    """
     WEB.mkdir(parents=True, exist_ok=True)
     DATA.mkdir(parents=True, exist_ok=True)
     DB.initialize()
@@ -705,17 +713,26 @@ def main():
         build=BUILD,
         selected_profile=config.selected_profile,
     )
+    return ThreadingHTTPServer((HOST, PORT), Handler)
+
+
+def finalize_server(server: ThreadingHTTPServer) -> None:
+    """Para observadores, registra o fim e libera o socket."""
+    OBSERVER_RUNNER.stop()
+    APP_LOG.write("server_stopped")
+    server.server_close()
+
+
+def main():
+    server = create_server()
     print(f"Zeus PC {__version__} ({BUILD})")
     print(f"http://{HOST}:{PORT}")
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        OBSERVER_RUNNER.stop()
-        APP_LOG.write("server_stopped")
-        server.server_close()
+        finalize_server(server)
 
 
 if __name__ == "__main__":

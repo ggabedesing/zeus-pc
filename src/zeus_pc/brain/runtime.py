@@ -16,12 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..app_paths import data_dir
 from .registry import BrainError
 
-# brain/runtime.py vive um nível mais fundo que zeus_pc/server.py:
-# parents[3] é a raiz do repositório, não src/.
-ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_MODELS_DIR = ROOT / "data" / "models"
+# Modelos ficam em data/models — resolvido pelo app_paths (frozen-aware),
+# ou por ZEUS_MODELS_DIR.
 DEFAULT_BASE_URL = os.environ.get(
     "ZEUS_BRAIN_URL",
     "http://127.0.0.1:8081",
@@ -33,7 +32,7 @@ LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
 
 def models_dir() -> Path:
     override = os.environ.get("ZEUS_MODELS_DIR")
-    return Path(override) if override else DEFAULT_MODELS_DIR
+    return Path(override) if override else data_dir() / "models"
 
 
 def model_path(filename: str, directory: Path | None = None) -> Path:

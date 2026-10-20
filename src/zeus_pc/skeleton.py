@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .actions import list_power_plans
+from .app_paths import data_dir
 from .brain import (
     DEFAULT_MODEL_REGISTRY,
     BrainError,
@@ -464,8 +465,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--serve-timeout", type=float, default=90.0)
     args = parser.parse_args(argv)
 
-    root = Path(__file__).resolve().parents[2]
-    database = ZeusDatabase(root / "data" / "zeus.db")
+    database = ZeusDatabase(data_dir() / "zeus.db")
     database.initialize()
 
     report = run_skeleton(

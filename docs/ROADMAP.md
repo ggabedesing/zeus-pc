@@ -46,6 +46,7 @@
 - [x] Runner do walking skeleton (python -m zeus_pc.skeleton: modelo → serve → invoke → trocar e restaurar plano)
 - [ ] Walking skeleton real no PC Windows: transação real já executada e revertida no PC (powercfg + restore VERIFIED em 2026-10-18); falta o GGUF real com invoke medido
 - [x] Painel desktop legível (Increment 022): sem JSON no fluxo, veredito na tela inicial, domínios agrupados + decodificação honesta do powercfg (OEM)
+- [x] ZeusPC.exe + instalador por usuário sem UAC com Menu Iniciar e dados preservados na desinstalação (Increment 023): `dist/ZeusPC-Setup-0.1.0.exe`
 - [ ] Inferência local embutida ponta a ponta (modelo baixado, offline, sem chaves de API)
 - [ ] Loop do agente (perceber → pensar → decidir → executar → verificar → refletir)
 - [ ] Modos Assessor/Operador com consentimento
