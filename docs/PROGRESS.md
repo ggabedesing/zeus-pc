@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-20 (packaging: ZeusPC.exe + Inno Setup installer)
+Updated: 2026-10-20 (packaging + real execution from the UI)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,16 @@ Updated: 2026-10-20 (packaging: ZeusPC.exe + Inno Setup installer)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 024 — Real execution from the UI (prepare → consent → execute).
+
+Status:
+- web/app.js gained a generic transaction flow (postJson, consent modal with before-state/rollback/expiry, .tx-status banner): Sistema → Energia now shows an "Ativar" button per inactive plan, runs /api/transactions/prepare → consent → execute and re-renders with the verified result;
+- optimization findings carrying SET_ACTIVE_POWER_PLAN get an "Aplicar com consentimento…" button (plan picker → same flow) and refresh the plan afterwards;
+- no backend change: rules.py already published action_id and the transaction engine already existed — only the UI was missing;
+- real proof in the browser on this machine: activated "Desempenho Máximo" (banner "✓ Execucao aplicada e verificada com sucesso", plan flipped), then restored "Alto desempenho"; app log shows two full prepared → consented → verified cycles; browser console empty;
+- Python suite untouched at 204 passing (no .py changed in this increment).
+
+## Previous increment (023)
 Increment 023 — Packaging: ZeusPC.exe (onefile) + Inno Setup installer (per-user, no UAC).
 
 Status:

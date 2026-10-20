@@ -170,3 +170,22 @@ p{margin:0}
   .kv{grid-template-columns:1fr;gap:2px}
 }
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* transações reais (preparar → consentir → executar) */
+.tx-status{font-size:12.5px;color:var(--muted);margin:0 0 10px}
+.tx-status:empty{display:none}
+.tx-status.ok{color:var(--accent)}
+.tx-status.err{color:var(--danger)}
+.tx-status.wait{color:var(--accent2)}
+.tx-btn{padding:5px 11px;font-size:12px}
+.row-action{margin-top:9px}
+.modal-overlay{position:fixed;inset:0;background:rgba(3,7,10,.72);display:grid;place-items:center;z-index:90;padding:24px}
+.modal-card{width:min(470px,100%);background:var(--surface);border:1px solid var(--line-strong);border-radius:14px;padding:20px 22px;box-shadow:var(--shadow);display:grid;gap:6px}
+.modal-card h4{font-size:15.5px}
+.modal-sub{color:var(--muted);font-size:13px;margin-bottom:6px;line-height:1.5}
+.modal-card .kv{grid-template-columns:minmax(110px,150px) 1fr;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+.plan-list{display:grid;gap:6px;margin:6px 0 4px}
+.plan-pick{display:flex;gap:9px;align-items:center;padding:9px 11px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px}
+.plan-pick:hover{border-color:var(--muted);background:rgba(255,255,255,.03)}
+.plan-pick input{accent-color:var(--accent)}

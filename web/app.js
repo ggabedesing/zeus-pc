@@ -311,12 +311,22 @@ function findingNode(finding) {
   if (finding.confidence) meta.push("Confiança: " + String(finding.confidence).toLowerCase());
   if (finding.automation_eligible) meta.push("Pode ser aplicado com consentimento");
 
+  const actionable = finding.action_id === "SET_ACTIVE_POWER_PLAN";
   div.innerHTML =
     "<div class='row-main'><h4>" + escapeHtml(finding.title) + "</h4>" +
     "<p>" + escapeHtml(reasons.join(" ")) + "</p>" +
-    "<small>" + escapeHtml(meta.join(" · ")) + "</small></div>" +
+    "<small>" + escapeHtml(meta.join(" · ")) + "</small>" +
+    (actionable
+      ? "<button class='ghost-btn row-action'>Aplicar com consentimento…</button>"
+      : "") +
+    "</div>" +
     "<span class='tag tag-" + escapeHtml(key) + "'>" +
     escapeHtml(FINDING_LABELS[status] || status) + "</span>";
+  if (actionable) {
+    div.querySelector(".row-action").addEventListener("click", function () {
+      applyFindingAction();
+    });
+  }
   return div;
 }
 
@@ -656,18 +666,7 @@ document.querySelectorAll(".tile").forEach(function (tile) {
     document.querySelectorAll(".tile").forEach(function (t) { t.classList.toggle("active", t === tile); });
 
     if (type === "power") {
-      try {
-        const response = await fetch("/api/power-plans", { cache: "no-store" });
-        const data = await response.json();
-        const rows = (data.plans || []).map(function (plan) {
-          return "<div class='kv'><span>" + escapeHtml(plan.name) + "</span><b>" +
-            (plan.active ? "ativo" : "—") + "</b></div>";
-        }).join("");
-        panel.innerHTML = "<h4 class='panel-title'>Planos de energia</h4>" +
-          (rows || "<p class='msg'>Nenhum plano encontrado.</p>");
-      } catch (error) {
-        panel.innerHTML = "<p class='msg'>Não foi possível ler os planos de energia.</p>";
-      }
+      await renderPowerPanel();
       return;
     }
 
@@ -680,6 +679,223 @@ document.querySelectorAll(".tile").forEach(function (tile) {
     panel.innerHTML = panelRows(entry[0], entry[1]);
   });
 });
+
+/* ---------- transações reais: preparar → consentir → executar ---------- */
+
+const ACTION_LABELS = { SET_ACTIVE_POWER_PLAN: "Trocar o plano de energia" };
+
+async function postJson(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await response.json(); } catch (error) { data = {}; }
+  if (!response.ok) throw new Error(data.message || "Erro " + response.status);
+  return data;
+}
+
+function txStatus(html, kind) {
+  const box = $("txStatus") || $("planStatus");
+  if (!box) return;
+  box.className = "tx-status" + (kind ? " " + kind : "");
+  box.innerHTML = html;
+}
+
+function buildModal(innerHtml) {
+  const root = document.createElement("div");
+  root.className = "modal-overlay";
+  root.innerHTML = "<div class='modal-card'>" + innerHtml + "</div>";
+  document.body.appendChild(root);
+  const close = function () { root.remove(); };
+  root.addEventListener("click", function (event) {
+    if (event.target === root) close();
+  });
+  return { root: root, close: close };
+}
+
+function oneLine(value) {
+  if (value == null) return "—";
+  if (typeof value !== "object") return String(value);
+  const parts = Object.keys(value).map(function (key) {
+    const item = value[key];
+    return item == null || typeof item === "object" ? null : String(item);
+  }).filter(Boolean);
+  return parts.join(" · ") || "—";
+}
+
+function consentDialog(tx, label) {
+  return new Promise(function (resolve) {
+    const expires = String(tx.consent_expires_at || "")
+      .replace("T", " ").split(".")[0].replace(/Z$/, "") + " (UTC)";
+    const modal = buildModal(
+      "<h4>Confirmar alteração</h4>" +
+      "<p class='modal-sub'>" + escapeHtml(label) + "</p>" +
+      "<div class='kv'><span>o que vai mudar</span><b>" +
+      escapeHtml(ACTION_LABELS[tx.action_id] || tx.action_id) + "</b></div>" +
+      "<div class='kv'><span>estado atual</span><b>" +
+      escapeHtml(oneLine(tx.before_state)) + "</b></div>" +
+      "<div class='kv'><span>como desfazer</span><b>" +
+      escapeHtml(oneLine(tx.rollback_preview)) + "</b></div>" +
+      "<div class='kv'><span>consentimento</span><b>válido até " +
+      escapeHtml(expires) + "</b></div>" +
+      "<div class='modal-actions'>" +
+      "<button class='primary-btn' id='txConfirm'>Confirmar e aplicar</button>" +
+      "<button class='ghost-btn' id='txCancel'>Cancelar</button></div>");
+    modal.root.querySelector("#txConfirm").addEventListener("click", function () {
+      modal.close();
+      resolve(true);
+    });
+    modal.root.querySelector("#txCancel").addEventListener("click", function () {
+      modal.close();
+      resolve(false);
+    });
+  });
+}
+
+function choosePowerPlan() {
+  return fetch("/api/power-plans", { cache: "no-store" })
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+      return new Promise(function (resolve) {
+        const inactive = (data.plans || []).filter(function (plan) {
+          return !plan.active;
+        });
+        if (!inactive.length) {
+          const modal = buildModal(
+            "<h4>Planos de energia</h4>" +
+            "<p class='modal-sub'>Nenhum plano alternativo — o ativo já está aplicado.</p>" +
+            "<div class='modal-actions'><button class='ghost-btn' id='txCancel'>Fechar</button></div>");
+          modal.root.querySelector("#txCancel").addEventListener("click", function () {
+            modal.close();
+            resolve(null);
+          });
+          return;
+        }
+        const items = inactive.map(function (plan, index) {
+          return "<label class='plan-pick'><input type='radio' name='planPick' value='" +
+            escapeHtml(plan.guid) + "' data-name='" + escapeHtml(plan.name) + "'" +
+            (index === 0 ? " checked" : "") + "><span>" + escapeHtml(plan.name) +
+            "</span></label>";
+        }).join("");
+        const modal = buildModal(
+          "<h4>Escolher plano de energia</h4>" +
+          "<p class='modal-sub'>A troca é verificada pelo Windows e pode ser desfeita.</p>" +
+          "<div class='plan-list'>" + items + "</div>" +
+          "<div class='modal-actions'>" +
+          "<button class='primary-btn' id='txConfirm'>Continuar</button>" +
+          "<button class='ghost-btn' id='txCancel'>Cancelar</button></div>");
+        modal.root.querySelector("#txCancel").addEventListener("click", function () {
+          modal.close();
+          resolve(null);
+        });
+        modal.root.querySelector("#txConfirm").addEventListener("click", function () {
+          const selected = modal.root.querySelector("input[name='planPick']:checked");
+          if (!selected) return;
+          const chosen = { guid: selected.value, name: selected.dataset.name };
+          modal.close();
+          resolve(chosen);
+        });
+      });
+    });
+}
+
+async function renderPowerPanel(statusHtml, statusKind) {
+  const panel = $("morePanel");
+  try {
+    const response = await fetch("/api/power-plans", { cache: "no-store" });
+    const data = await response.json();
+    const rows = (data.plans || []).map(function (plan) {
+      const action = plan.active
+        ? "<b class='good'>ativo</b>"
+        : "<button class='ghost-btn tx-btn' data-guid='" + escapeHtml(plan.guid) +
+          "' data-name='" + escapeHtml(plan.name) + "'>Ativar</button>";
+      return "<div class='kv'><span>" + escapeHtml(plan.name) + "</span>" +
+        action + "</div>";
+    }).join("");
+    panel.innerHTML = "<h4 class='panel-title'>Planos de energia</h4>" +
+      "<div id='txStatus' class='tx-status'></div>" +
+      (rows || "<p class='msg'>Nenhum plano encontrado.</p>");
+    if (statusHtml) txStatus(statusHtml, statusKind);
+    panel.querySelectorAll(".tx-btn").forEach(function (button) {
+      button.addEventListener("click", async function () {
+        button.disabled = true;
+        const result = await applyPowerPlan(button.dataset.guid, button.dataset.name);
+        button.disabled = false;
+        if (result && result.ok) {
+          await renderPowerPanel(
+            "✓ " + escapeHtml(result.message || "Plano alterado e verificado."),
+            "ok"
+          );
+        }
+      });
+    });
+  } catch (error) {
+    panel.innerHTML = "<p class='msg'>Não foi possível ler os planos de energia.</p>";
+  }
+}
+
+async function applyPowerPlan(guid, planName) {
+  txStatus("Preparando a alteração…", "wait");
+  try {
+    const prepared = await postJson("/api/transactions/prepare", {
+      action_id: "SET_ACTIVE_POWER_PLAN",
+      args: { guid: guid },
+    });
+    const tx = prepared.transaction;
+    const confirmed = await consentDialog(tx, "Plano de energia → " + planName);
+    if (!confirmed) {
+      txStatus("Cancelado — nada foi alterado.", "info");
+      return null;
+    }
+    await postJson("/api/transactions/consent", {
+      transaction_id: tx.transaction_id,
+      consent_token: tx.consent_token,
+    });
+    const result = await postJson("/api/transactions/execute", {
+      transaction_id: tx.transaction_id,
+    });
+    if (!result.ok) {
+      txStatus(
+        "✗ " + escapeHtml(result.message || "A alteração não foi confirmada."),
+        "err"
+      );
+    }
+    return result;
+  } catch (error) {
+    txStatus("✗ " + escapeHtml(error.message || String(error)), "err");
+    return null;
+  }
+}
+
+async function applyFindingAction() {
+  const choice = await choosePowerPlan();
+  if (!choice) {
+    txStatus("Cancelado — nada foi alterado.", "info");
+    return;
+  }
+  const result = await applyPowerPlan(choice.guid, choice.name);
+  if (result && result.ok) {
+    txStatus(
+      "✓ " + escapeHtml(result.message || "Plano alterado e verificado."),
+      "ok"
+    );
+  }
+  refreshOptimizationPlan();
+}
+
+async function refreshOptimizationPlan() {
+  try {
+    const response = await fetch("/api/optimization/plan", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    lastPlan = data.plan;
+    renderPlan();
+  } catch (error) {
+    console.debug(error);
+  }
+}
 
 /* ---------- eventos ---------- */
 
