@@ -89,9 +89,13 @@ class AppPathsFrozenTests(unittest.TestCase):
                     patch.object(sys, "_MEIPASS", None, create=True),
                     patch.object(sys, "executable", str(exe)),
                 ):
-                    # _MEIPASS None (modo onedir sem extração) -> pasta do EXE
-                    self.assertEqual(app_paths.bundle_dir(), Path(tmp))
-                    self.assertEqual(app_paths.web_dir(), Path(tmp) / "web")
+                    # _MEIPASS None (modo onedir sem extração) -> pasta do EXE.
+                    # resolve() nos dois lados: o runner do CI expõe o temp
+                    # como nome 8.3 (RUNNER~1) e resolve() expande para o nome
+                    # longo — a comparação é pela pasta, não pela grafia.
+                    base = Path(tmp).resolve()
+                    self.assertEqual(app_paths.bundle_dir(), base)
+                    self.assertEqual(app_paths.web_dir(), base / "web")
 
     def test_is_frozen_false_in_normal_runs(self) -> None:
         self.assertFalse(app_paths.is_frozen())
