@@ -670,6 +670,11 @@ document.querySelectorAll(".tile").forEach(function (tile) {
       return;
     }
 
+    if (type === "drivers") {
+      await renderDriversPanel();
+      return;
+    }
+
     const map = {
       updates: ["Atualizações do Windows", "Windows Update"],
       startup: ["Programas na inicialização", "Startup"],
@@ -866,6 +871,117 @@ async function applyPowerPlan(guid, planName) {
   } catch (error) {
     txStatus("✗ " + escapeHtml(error.message || String(error)), "err");
     return null;
+  }
+}
+
+/* ---------- inventário de drivers (somente leitura) ---------- */
+
+const DRIVER_STATUS_LABELS = {
+  UNSIGNED: "sem assinatura",
+  UNKNOWN_SIGN: "assinatura desconhecida",
+  OLD: "antigo (+3 anos)",
+  OK: "ok",
+};
+
+let driversOnlyProblems = false;
+
+function driverRow(driver) {
+  const div = document.createElement("div");
+  div.className = "row";
+  const status = String(driver.status || "OK");
+  const bits = [];
+  if (driver.provider) bits.push(driver.provider);
+  if (driver.class_name) bits.push(driver.class_name);
+  if (driver.version) bits.push("v" + driver.version);
+  if (driver.date) bits.push("desde " + formatDate(driver.date));
+  div.innerHTML =
+    "<div class='row-main'><h4>" +
+    escapeHtml(driver.device_name || "Dispositivo não identificado") +
+    "</h4><small>" + escapeHtml(bits.join(" · ") || "sem detalhes") +
+    "</small></div>" +
+    "<span class='tag tag-driver-" + escapeHtml(status.toLowerCase()) +
+    "'>" + escapeHtml(DRIVER_STATUS_LABELS[status] || status) + "</span>";
+  return div;
+}
+
+function renderDriverInventory(inventory) {
+  const panel = $("morePanel");
+  const summary = inventory.summary || {};
+  const devices = inventory.devices || [];
+  const store = inventory.store || [];
+  const problems = summary.unsigned_count || 0;
+  const unknown = summary.unknown_sign_count || 0;
+  const old = summary.old_count || 0;
+
+  const shown = driversOnlyProblems
+    ? devices.filter(function (d) { return d.status !== "OK"; })
+    : devices;
+  const visible = shown.slice(0, 60);
+  const hidden = shown.length - visible.length;
+
+  panel.innerHTML =
+    "<h4 class='panel-title'>Drivers no seu PC</h4>" +
+    (inventory.message
+      ? "<p class='msg'>" + escapeHtml(inventory.message) + "</p>"
+      : "") +
+    (inventory.store_error
+      ? "<p class='msg'>Loja de drivers indisponível: " +
+        escapeHtml(inventory.store_error) + "</p>"
+      : "") +
+    (inventory.device_error
+      ? "<p class='msg'>Dispositivos indisponíveis: " +
+        escapeHtml(inventory.device_error) + "</p>"
+      : "") +
+    "<div class='kv'><span>drivers instalados</span><b>" +
+    escapeHtml(summary.device_count || 0) + "</b></div>" +
+    "<div class='kv'><span>sem assinatura</span><b class='" +
+    (problems ? "warn" : "good") + "'>" + escapeHtml(problems) + "</b></div>" +
+    "<div class='kv'><span>assinatura desconhecida</span><b>" +
+    escapeHtml(unknown) + "</b></div>" +
+    "<div class='kv'><span>antigos (mais de " +
+    escapeHtml(inventory.old_after_days || 1095) + " dias)</span><b>" +
+    escapeHtml(old) + "</b></div>" +
+    "<div class='kv'><span>pacotes na loja</span><b>" +
+    escapeHtml(summary.store_count || 0) +
+    (summary.store_unsigned_count
+      ? " · " + summary.store_unsigned_count + " sem assinante"
+      : "") + "</b></div>" +
+    "<div class='driver-tools'>" +
+    "<button class='ghost-btn' id='driverFilter'>" +
+    (driversOnlyProblems ? "Ver todos" : "Só com problema") + "</button>" +
+    "<span class='meta'>" + visible.length + " de " + shown.length +
+    " listados · somente leitura</span></div>" +
+    "<div id='driverList' class='list'></div>" +
+    (hidden > 0
+      ? "<p class='msg'>+" + hidden + " outros não exibidos.</p>"
+      : "");
+
+  const list = $("driverList");
+  if (!visible.length) {
+    list.classList.add("empty");
+    list.textContent = driversOnlyProblems
+      ? "Nenhum driver com problema — tudo assinado e dentro da idade."
+      : "Nenhum driver reportado pelo Windows.";
+  } else {
+    visible.forEach(function (driver) { list.appendChild(driverRow(driver)); });
+  }
+  $("driverFilter").addEventListener("click", function () {
+    driversOnlyProblems = !driversOnlyProblems;
+    renderDriverInventory(inventory);
+  });
+}
+
+async function renderDriversPanel() {
+  const panel = $("morePanel");
+  panel.innerHTML = "<p class='msg'>Lendo a loja de drivers e os dispositivos…</p>";
+  try {
+    const response = await fetch("/api/drivers", { cache: "no-store" });
+    if (!response.ok) throw new Error("Erro " + response.status);
+    const inventory = await response.json();
+    renderDriverInventory(inventory);
+  } catch (error) {
+    panel.innerHTML = "<p class='msg'>Não foi possível ler os drivers: " +
+      escapeHtml(error.message || String(error)) + "</p>";
   }
 }
 

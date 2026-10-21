@@ -21,6 +21,7 @@ from .brain import (
 )
 from .config import CONFIG_SCHEMA_VERSION, load_config, save_config
 from .doctor import build_doctor_report
+from .drivers import collect_driver_inventory
 from .engine import build_recommendations
 from .observer import OBSERVER, OBSERVER_RUNNER
 from .optimization import build_optimization_plan, snapshot_from_payload
@@ -414,6 +415,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": False, "message": str(exc)}, 409)
         if path == "/api/power-plans":
             return self.send_json({"plans": list_power_plans()})
+        if path == "/api/drivers":
+            inventory = collect_driver_inventory()
+            summary = inventory.get("summary", {})
+            APP_LOG.write(
+                "drivers_inventoried",
+                device_count=summary.get("device_count"),
+                unsigned_count=summary.get("unsigned_count"),
+                old_count=summary.get("old_count"),
+                store_count=summary.get("store_count"),
+            )
+            return self.send_json(inventory)
         if path.startswith("/api/"):
             return self.send_json({"error": "Endpoint nao encontrado."}, 404)
 

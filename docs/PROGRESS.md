@@ -1,6 +1,6 @@
 # Zeus PC — Development Progress
 
-Updated: 2026-10-20 (packaging + real execution from the UI)
+Updated: 2026-10-21 (Driver Booster-style driver inventory)
 
 ## Completed foundations
 - Clean repository and Windows CI.
@@ -16,6 +16,19 @@ Updated: 2026-10-20 (packaging + real execution from the UI)
 - Formal dry-run Optimization Engine with typed findings, evidence/confidence, compatibility gates and action-collision detection.
 
 ## Current increment
+Increment 025 — Driver inventory, read-only (Driver Booster's heart, without executing anything).
+
+Status:
+- new src/zeus_pc/drivers.py: two complementary sources without special privileges — pnputil /enum-drivers (store packages oem*.inf: provider, class, GUID, version, date, signer) and Win32_PnPSignedDriver (per-device version/date/IsSigned; dates accept /Date(ms)/, ISO, DMTF with +000 offset and 13-digit epoch);
+- honest decode: pnputil writes ANSI (cp1252) on this pt-BR machine while the powercfg-style OEM-first decode silently produced "versoo do driver" (0xE3 = Ò in cp850), so _decode_for_labels picks between UTF-8/OEM/ANSI/latin-1 by scoring known pt-BR/en-US labels present in each candidate; real labels (Nome do Signatário, GUID de Classe) and the pt-BR version line with embedded US date (07/18/1968 10.1.14.7 → version + date) are parsed;
+- placeholder dates are not age: NULL_DRIVER_DATES (2006-06-21 inbox baseline, 1968 WDK nulls, 1970-01-01 WMI DriverDate=0, 1601 FILETIME epoch) render date=None (no "desde") and are excluded from the OLD test — false positives dropped from 127 to 24 on this machine;
+- honest classification, no online catalog: UNSIGNED (IsSigned False), UNKNOWN_SIGN (IsSigned absent — Windows asserted nothing, not counted as unsigned), OLD (signed and older than OLD_DRIVER_DAYS=1095), OK; devices sorted UNSIGNED → UNKNOWN_SIGN → OLD → OK then alphabetically;
+- GET /api/drivers behind the increment-020 loopback guards, no-store, returns store[], devices[], summary (device/unsigned/unknown_sign/old/store/store_unsigned counts), old_after_days and best-effort store_error/device_error when one source fails; logs drivers_inventoried with the counts;
+- UI: fifth tile "Drivers" on Sistema (tile-row is now auto-fit), panel with summary kv rows, "Só com problema" filter toggle, list capped at 60 rows with "+N outros", always-visible "somente leitura" marker, new tags tag-driver-unsigned/unknown_sign/old/ok;
+- 230 unit tests pass (26 new in tests/test_drivers.py: pt-BR and en-US parsers, real-machine pt-BR format, decode scoring, version/date split, placeholder dates, unknown-label resilience, date formats, classification boundaries, normalize_device, real-Handler route test with patched collectors + Host guard 403); five failures found and fixed at the cause (DMTF regex rejected the WMI +000 offset; ANSI decode; missing labels; embedded date; 2006/1970/1968/1601 placeholder dates counted as OLD);
+- compileall OK; real proof on this machine: server at 127.0.0.1:8000 → Sistema → Drivers panel shows 161 devices, 0 unsigned, 2 unknown-sign, 24 old, 46 store packages (0 without signer), filter lists 26 of 26, placeholder dates show no "desde", browser console empty (details in 025-driver-inventory.md).
+
+## Previous increment (024)
 Increment 024 — Real execution from the UI (prepare → consent → execute).
 
 Status:

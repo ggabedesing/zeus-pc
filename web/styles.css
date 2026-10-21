@@ -131,7 +131,7 @@ p{margin:0}
 .domain-card header{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
 .domain-card h4{font-size:13.5px;font-weight:700}
 
-.tile-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+.tile-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
 .tile{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);
   padding:16px;text-align:left;color:var(--text);cursor:pointer;transition:.15s}
 .tile:hover{border-color:var(--line-strong);background:var(--surface2)}
@@ -189,3 +189,10 @@ p{margin:0}
 .plan-pick{display:flex;gap:9px;align-items:center;padding:9px 11px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px}
 .plan-pick:hover{border-color:var(--muted);background:rgba(255,255,255,.03)}
 .plan-pick input{accent-color:var(--accent)}
+
+/* inventário de drivers (somente leitura) */
+.driver-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:14px 0 10px}
+.tag-driver-unsigned{color:var(--danger);border-color:rgba(255,122,133,.4);background:rgba(255,122,133,.08)}
+.tag-driver-unknown_sign{color:var(--warning);border-color:rgba(242,193,78,.4);background:rgba(242,193,78,.08)}
+.tag-driver-old{color:var(--warning);border-color:rgba(242,193,78,.4);background:rgba(242,193,78,.08)}
+.tag-driver-ok{color:var(--accent);border-color:rgba(102,224,138,.4);background:rgba(102,224,138,.08)}

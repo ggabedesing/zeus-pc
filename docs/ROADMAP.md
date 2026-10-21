@@ -55,7 +55,7 @@
 - [ ] Servidor MCP local (Obsidian/Codex)
 
 ## Drivers e atualizações
-- [ ] Inventário de drivers
+- [x] Inventário de drivers (Increment 025): pnputil /enum-drivers + Win32_PnPSignedDriver, classificação sem assinatura / desconhecida / antiga, painel “Drivers” em Sistema
 - [ ] Discovery de updates
 - [ ] Windows Update Center
 - [ ] winget software updates
