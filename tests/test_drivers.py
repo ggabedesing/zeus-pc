@@ -15,6 +15,7 @@ from zeus_pc.drivers import (
     OLD_DRIVER_DAYS,
     WINDOWS_DRIVER_EPOCH,
     _annotate_store,
+    _codepage,
     _decode_for_labels,
     classify_device,
     normalize_device,
@@ -151,18 +152,56 @@ class RealPnpFormatTests(unittest.TestCase):
 
 
 class DecodeForLabelsTests(unittest.TestCase):
-    """O pnputil escreve em ANSI (cp1252) nesta maquina; o mesmo byte
-    0xE3 e 'O com grave' em cp850 — ambos decodificam sem erro, entao o
-    decode tem que ser escolhido por evidencia (rotulos conhecidos)."""
+    """O mesmo byte significa coisas diferentes em OEM e ANSI; o decode
+    tem que ser escolhido por evidencia (rotulos conhecidos)."""
 
     @unittest.skipUnless(os.name == "nt", "codepages Windows")
     def test_prefers_the_decode_that_keeps_known_labels(self):
-        text = "Versão do Driver:  10/15/2024 1.0.0.1052\n"
-        for encoding in ("cp1252", "cp850"):
-            raw = text.encode(encoding)
+        text = "Nome do Signatário: INTEL(R) CORPORATION\n"
+        # As ferramentas do Windows escrevem no OEM (console) ou no ANSI
+        # (processo) da MÁQUINA: testamos os codepages reais de cada
+        # sistema — cp850/cp1252 nesta máquina pt-BR, cp437/cp1252 no
+        # runner en-US (que nem tem 'ã' no cp437, por isso o acento em
+        # 'á', presente em todos). Codificar em cp850 fixo como antes só
+        # funcionava em máquinas pt-BR.
+        checked = 0
+        for name in ("GetOEMCP", "GetACP"):
+            encoding = _codepage(name)
+            if not encoding:
+                continue
+            try:
+                raw = text.encode(encoding)
+            except UnicodeEncodeError:
+                continue  # a codepage desta máquina não tem o acento
             decoded = _decode_for_labels(raw)
-            self.assertIn("ã", decoded, encoding)
-            self.assertIn("Versão", decoded, encoding)
+            self.assertIn("Signatário", decoded, encoding)
+            checked += 1
+        self.assertGreaterEqual(checked, 1)
+
+    def test_scoring_is_deterministic_for_pt_br_and_en_us_pairs(self):
+        # Sem depender da máquina de teste: simula os dois pares reais.
+        # pt-BR: ANSI cp1252 com OEM cp850; en-US: ANSI cp1252 com
+        # OEM cp437 (não tem 'ã', por isso o braço en-US só usa 'á').
+        signatario = "Nome do Signatário: INTEL\n"
+        cases = (
+            ("cp1252", signatario + "Versão do Driver:  1.0.0.1\n", "cp850", "cp1252"),
+            ("cp850", signatario + "Versão do Driver:  1.0.0.1\n", "cp850", "cp1252"),
+            ("cp437", signatario, "cp437", "cp1252"),
+        )
+        for raw_encoding, text, oem, ansi in cases:
+            try:
+                raw = text.encode(raw_encoding)
+            except UnicodeEncodeError:
+                continue
+            with patch(
+                "zeus_pc.drivers._codepage",
+                side_effect=lambda name, oem=oem, ansi=ansi: {
+                    "GetOEMCP": oem,
+                    "GetACP": ansi,
+                }.get(name),
+            ):
+                decoded = _decode_for_labels(raw)
+            self.assertIn("Signatário", decoded, raw_encoding)
 
     def test_utf8_is_used_when_valid(self):
         text = "Nome do Signatário: INTEL\n"

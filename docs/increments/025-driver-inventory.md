@@ -89,7 +89,7 @@ contagens.
 - data exibida como data real (`formatDate`), provedor/classe/versão numa
   linha secundária.
 
-## Testes (26 novos — 230 no total)
+## Testes (27 novos — 231 no total)
 
 `tests/test_drivers.py`:
 
@@ -109,7 +109,9 @@ contagens.
   embutida, e o split versão/data no `_annotate_store`;
 - decode por evidência (`_decode_for_labels`): cp1252 e cp850 da mesma
   string ambos resolvem para os rótulos corretos; UTF-8 preferido quando
-  válido; entrada vazia;
+  válido; entrada vazia; pares reais de cada máquina (OEM+ANSI) e pares
+  pt-BR/en-US simulados por mock dos codepages — determinísticos em
+  qualquer CI;
 - datas-placeholder: `1970-01-01`/`1968-07-18`/`1601-01-01` não viram OLD,
   `1968-07-18` embutido na versão vira `date = None`, `WINDOWS_DRIVER_EPOCH
   = 2006-06-21` fica em `NULL_DRIVER_DATES` e `DriverDate=/Date(0)/` no
@@ -125,11 +127,16 @@ Falhas encontradas e corrigidas **na causa** durante o incremento:
 3. rótulos reais ausentes do mapa (`Nome do Signatário`, `GUID de Classe`);
 4. a data embutida na linha da versão contamina o campo `version`;
 5. a baseline 2006-06-21 (e as demais datas-placeholder) inflavam
-   `old_count` para 127 alarmes falsos.
+   `old_count` para 127 alarmes falsos;
+6. no CI (run 49): o teste de decode codificava em **cp850 fixo** —
+   o OEM desta máquina pt-BR —, mas o runner en-US usa OEM **cp437**;
+   o contrato certo é decodificar os codepages reais da máquina, então
+   o teste agora percorre OEM+ANSI reais e cobre os pares pt-BR/en-US
+   com codepages simulados.
 
 ## Verificação
 
-- 230 testes locais OK; `compileall` OK;
+- 231 testes locais OK; `compileall` OK;
 - servidor real em `http://127.0.0.1:8000` → tile Drivers → painel com
   dados reais desta máquina: **161 dispositivos, 0 sem assinatura,
   2 assinatura desconhecida, 24 antigos, 46 pacotes na loja (0 sem
