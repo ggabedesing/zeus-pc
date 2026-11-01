@@ -14,6 +14,7 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(config.schema_version, CONFIG_SCHEMA_VERSION)
             self.assertEqual(config.selected_profile, "GENERAL")
             self.assertEqual(config.history_limit, 20)
+            self.assertFalse(config.observer_enabled, 'O otimizador deve ficar ocioso até a pessoa iniciar uma análise.')
 
     def test_partial_update_preserves_existing_values(self):
         with tempfile.TemporaryDirectory() as tmp:

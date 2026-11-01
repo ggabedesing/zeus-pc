@@ -11,6 +11,8 @@ from enum import StrEnum
 from typing import Any, Callable
 
 from .actions import GUID_RE, list_power_plans, set_power_plan
+from .desktop import read_animations, write_animations
+from .startup import list_startup, set_startup_enabled
 from .persistence import ZeusDatabase
 
 
@@ -198,6 +200,75 @@ def _rollback_power_plan(
     return {"ok": bool(result.ok), "message": result.message}
 
 
+def _validate_animations(args):
+    if not isinstance(args, dict) or set(args) != {'enabled'} or not isinstance(args['enabled'], bool):
+        raise TransactionError('enabled deve ser true ou false, sem argumentos extras.')
+    return dict(args)
+
+
+def _capture_animations(_):
+    return {'enabled': read_animations()}
+
+
+def _verify_animations(args):
+    actual = read_animations()
+    return {'ok': actual is args['enabled'], 'enabled': actual, 'source': 'SystemParametersInfoW'}
+
+
+def _apply_animations(args):
+    write_animations(args['enabled'])
+    return {'ok': True}
+
+
+def _animations_inverse(before):
+    return {'action_id': 'SET_UI_ANIMATIONS', 'args': {'enabled': before['enabled']}}
+
+
+def _rollback_animations(before, _):
+    write_animations(before['enabled'])
+    return _verify_animations(before)
+
+
+def _validate_startup(args):
+    if (not isinstance(args, dict) or set(args) != {'name', 'enabled'}
+            or not isinstance(args['name'], str) or not isinstance(args['enabled'], bool)):
+        raise TransactionError('Entrada de inicialização inválida.')
+    entry = next((e for e in list_startup() if e['name'] == args['name']), None)
+    if not entry:
+        raise TransactionError('A entrada mudou. Analise novamente.')
+    return dict(args)
+
+
+def _capture_startup(args):
+    entry = next(e for e in list_startup() if e['name'] == args['name'])
+    return dict(entry)
+
+
+def _verify_startup(args):
+    entry = next((e for e in list_startup() if e['name'] == args['name']), None)
+    return {'ok': bool(entry and entry['enabled'] is args['enabled']), 'entry': entry}
+
+
+def _apply_startup(args):
+    if _verify_startup(args)['ok']:
+        return {'ok': True}
+    set_startup_enabled(args['name'], args['enabled'])
+    return {'ok': True}
+
+
+def _startup_inverse(before):
+    return {'action_id': 'SET_STARTUP_ENABLED', 'args': {'name': before['name'], 'enabled': before['enabled']}}
+
+
+def _rollback_startup(before, _):
+    args = _startup_inverse(before)['args']
+    current = _verify_startup(args)
+    if current['ok']:
+        return current
+    set_startup_enabled(args['name'], args['enabled'])
+    return _verify_startup(args)
+
+
 def build_default_registry() -> ActionRegistry:
     registry = ActionRegistry()
     registry.register(
@@ -229,6 +300,24 @@ def build_default_registry() -> ActionRegistry:
             },
         )
     )
+    registry.register(ActionDefinition(
+        action_id='SET_UI_ANIMATIONS', resource_key='UI_ANIMATIONS',
+        required_privilege='USER', reversible=True,
+        validate_args=_validate_animations, capture_before=_capture_animations,
+        verify=_verify_animations, rollback_preview=_animations_inverse,
+        apply=_apply_animations, rollback=_rollback_animations,
+        arg_schema={'type': 'object', 'properties': {'enabled': {'type': 'boolean'}},
+                    'required': ['enabled'], 'additionalProperties': False},
+    ))
+    registry.register(ActionDefinition(
+        action_id='SET_STARTUP_ENABLED', resource_key='USER_STARTUP',
+        required_privilege='USER', reversible=True,
+        validate_args=_validate_startup, capture_before=_capture_startup,
+        verify=_verify_startup, rollback_preview=_startup_inverse,
+        apply=_apply_startup, rollback=_rollback_startup,
+        arg_schema={'type': 'object', 'properties': {'name': {'type': 'string'}, 'enabled': {'type': 'boolean'}},
+                    'required': ['name', 'enabled'], 'additionalProperties': False},
+    ))
     return registry
 
 

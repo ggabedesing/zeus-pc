@@ -7,6 +7,5 @@ echo ================================
 echo            ZEUS PC
 echo ================================
 echo Abrindo http://127.0.0.1:8000
-start "" http://127.0.0.1:8000
-python -m zeus_pc.server
+python -m zeus_pc.launcher
 endlocal

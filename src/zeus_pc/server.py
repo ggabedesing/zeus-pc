@@ -29,6 +29,7 @@ from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
 from .transaction import TransactionEngine
+from .focus import FocusService
 
 # Caminhos frozen-aware: no EXE, web/ vem do bundle e data/ fica em
 # %LOCALAPPDATA%\ZeusPC\data (ver app_paths.py).
@@ -39,6 +40,17 @@ APP_LOG = StructuredLog(DATA / "zeus-app.jsonl", max_entries=2000)
 TRANSACTIONS = TransactionEngine(DB)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ZEUS_PORT", "8000"))
+
+
+def focus_service():
+    # Keep a single lock for scan/apply/undo while preserving test database injection.
+    global _FOCUS
+    if _FOCUS is None or _FOCUS.db is not DB or _FOCUS.transactions is not TRANSACTIONS:
+        _FOCUS = FocusService(DB, TRANSACTIONS)
+    return _FOCUS
+
+
+_FOCUS = None
 
 
 def dumps(payload) -> bytes:
@@ -243,6 +255,12 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/config":
             return self.send_json({"config": config.to_dict()})
+        if path == '/api/focus/state':
+            service = focus_service()
+            return self.send_json({
+                'report': service.public_report(DB.get_setting('focus_report')),
+                'runs': service.history(),
+            })
         if path == "/api/scan":
             profile = query.get("profile", [config.selected_profile])[0]
             return self.send_json(run_scan(profile))
@@ -461,6 +479,32 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = self.read_json()
+
+            if path == '/api/focus/analyze':
+                service = focus_service()
+                return self.send_json({'report': service.public_report(service.analyze(str(payload.get('goal') or 'daily')))})
+
+            if path == '/api/focus/apply':
+                result = focus_service().apply(str(payload.get('report_id') or ''), payload.get('action_ids'))
+                APP_LOG.write('focus_applied', report_id=result['id'], state=result['status'])
+                return self.send_json({'run': result})
+
+            if path == '/api/focus/undo':
+                result = focus_service().undo(str(payload.get('report_id') or ''))
+                APP_LOG.write('focus_undo', report_id=result['id'], undone=result['undone'])
+                return self.send_json({'run': result})
+
+            if path == '/api/focus/open':
+                # Closed, user-initiated destinations. Never accepts a path or command.
+                import subprocess
+                target = payload.get('target')
+                if os.name != 'nt' or target not in {'storage', 'taskmgr', 'startup'}:
+                    raise ValueError('Destino indisponível.')
+                if target == 'taskmgr':
+                    subprocess.Popen([str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'Taskmgr.exe')])
+                else:
+                    os.startfile({'storage': 'ms-settings:storagesense', 'startup': 'ms-settings:startupapps'}[target])
+                return self.send_json({'ok': True})
 
             if path == "/api/config":
                 config = save_config(DB, payload)
