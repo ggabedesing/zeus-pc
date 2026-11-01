@@ -273,6 +273,7 @@ def _public(state):
                 native_taskbar_hidden=bool(state and any(x.get('hidden') for x in state.get('bars', []))),
                 pid=state.get('pid') if state else None,
                 error=state.get('error') if state else None,
+                hotkey_registered=state.get('hotkey_registered') if state else None,
                 restore_errors=state.get('restore_errors', []) if state else [])
 
 
@@ -297,8 +298,8 @@ class Runtime:
             return _public(self._status_locked())
 
     def start(self, layout, hide_native_taskbar=False):
-        if layout not in ('dock', 'sidebar') or not isinstance(layout, str):
-            raise ValueError('Escolha dock ou sidebar.')
+        if not isinstance(layout, str) or layout not in ('dock', 'sidebar', 'environment'):
+            raise ValueError('Escolha dock, sidebar ou environment.')
         if type(hide_native_taskbar) is not bool:
             raise ValueError('hide_native_taskbar deve ser true ou false.')
         if not _native.supported:
@@ -327,7 +328,10 @@ class Runtime:
             if hide_native_taskbar:
                 command.append('--hide-native-taskbar')
             try:
-                process = _spawn(command, shell=False, stdin=subprocess.DEVNULL,
+                environment = dict(os.environ)
+                if not getattr(sys, 'frozen', False):
+                    environment['PYTHONPATH'] = str(Path(__file__).resolve().parents[1]) + os.pathsep + environment.get('PYTHONPATH', '')
+                process = _spawn(command, shell=False, env=environment, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                  close_fds=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
                 state['pid'] = process.pid
@@ -464,7 +468,7 @@ def _create_window(layout, on_close):
 
 def worker_main(argv=None):
     parser = argparse.ArgumentParser(description='Zeus own-window layout worker')
-    parser.add_argument('--layout-worker', required=True, choices=('dock', 'sidebar'))
+    parser.add_argument('--layout-worker', required=True, choices=('dock', 'sidebar', 'environment'))
     parser.add_argument('--runtime-dir', required=True)
     parser.add_argument('--token', required=True)
     parser.add_argument('--parent-pid', required=True, type=int)
@@ -493,6 +497,8 @@ def worker_main(argv=None):
         nonlocal root
         if root is not None:
             window, root = root, None
+            if hasattr(window, '_zeus_environment'):
+                window._zeus_environment.shutdown()
             window.destroy()
     def monitor():
         stop = directory / f'{args.token}.stop'
@@ -502,7 +508,11 @@ def worker_main(argv=None):
         root.after(750, monitor)
     code = 0
     try:
-        root = _create_window(args.layout_worker, close)
+        if args.layout_worker == 'environment':
+            from .environment_ui import create_environment
+            root = create_environment(close, state)
+        else:
+            root = _create_window(args.layout_worker, close)
         with _locked(directory):
             if args.hide_native_taskbar:
                 _hide_bars(directory, state)

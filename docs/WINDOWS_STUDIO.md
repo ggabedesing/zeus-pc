@@ -2,6 +2,10 @@
 
 O Zeus mantém quatro entradas: Otimizar, Personalizar, Sistema e Histórico. Todos os módulos de personalização são código do próprio Zeus. O pacote não instala nem controla Lively, TranslucentTB ou aplicativos equivalentes.
 
+## Ambiente integrado
+
+O ambiente do Zeus reúne relógio/calendário, CPU/RAM, notas locais, launcher e dock com aplicativos do Menu Iniciar. Temas, cores, densidade e posições são editáveis em uma prévia. Veja [o comportamento e os testes do ambiente](DESKTOP_ENVIRONMENT.md).
+
 ## Recursos implementados
 
 - Quatro temas com papel de parede gerado localmente, claro/escuro, translucidez nativa e sete preferências nativas de animação.

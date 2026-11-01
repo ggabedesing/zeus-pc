@@ -3,7 +3,7 @@ import os
 import threading
 import time
 
-from . import personalization, windows_preferences, lock_screen
+from . import personalization, windows_preferences, lock_screen, environment
 from .maintenance import MaintenanceJobs, OPERATIONS, is_admin
 from .probes import gpu_probe
 
@@ -19,6 +19,8 @@ class Studio:
         from .layout_runtime import Runtime as LayoutRuntime
         self.desktop = DesktopRuntime()
         self.layout = LayoutRuntime()
+        self.environment = environment.EnvironmentStore()
+        self.app_catalog = environment.ApplicationCatalog()
 
     def catalog(self):
         from .desktop_runtime import catalog as desktop_catalog
@@ -27,7 +29,50 @@ class Studio:
         appearance['capabilities']['lock_screen_wallpaper'] = True
         return {'preferences': windows_preferences.catalog(), 'personalization': appearance,
                 'maintenance': [{'id': id, **entry} for id, entry in OPERATIONS.items()],
-                'desktop_runtime': desktop_catalog(), 'layout_runtime': layout_catalog()}
+                'desktop_runtime': desktop_catalog(), 'layout_runtime': layout_catalog(),
+                'environment': {'themes': environment.THEMES, 'widgets': list(environment.WIDGETS)}}
+
+    def environment_state(self):
+        return {'config': self.environment.read(), 'applications': environment.BUILTINS + self.app_catalog.list(),
+                'runtime': self.runtimes()['layout_runtime'], 'supported': os.name == 'nt'}
+
+    def environment_command(self, payload):
+        if not isinstance(payload, dict) or set(payload) - {'command', 'config', 'apply_background', 'wallpaper_id', 'hide_native_taskbar'}:
+            raise ValueError('Comando de ambiente inválido.')
+        command = payload.get('command')
+        if command == 'stop':
+            return {'runtime': self.layout.stop(), 'config': self.environment.read()}
+        if command not in ('save', 'start'):
+            raise ValueError('Escolha salvar, iniciar ou parar o ambiente.')
+        changes = environment.validate(payload.get('config', {}))
+        if 'revision' in changes:
+            raise ValueError('A revisão é controlada pelo Zeus.')
+        if 'pinned' in changes:
+            known = {item['id'] for item in environment.BUILTINS + self.app_catalog.list()}
+            known.update(self.environment.read()['pinned'])
+            if set(changes['pinned']) - known:
+                raise ValueError('Escolha aplicativos presentes no catálogo.')
+        background = payload.get('apply_background', False)
+        hide = payload.get('hide_native_taskbar', False)
+        if type(background) is not bool or type(hide) is not bool:
+            raise ValueError('As opções do ambiente devem ser booleanas.')
+        if command == 'save' and (background or hide):
+            raise ValueError('Aplicar ao Windows exige iniciar o ambiente.')
+        actions = []
+        if background:
+            theme = changes.get('theme', self.environment.read()['theme'])
+            actions.append({'id': 'visual_preset', 'value': theme})
+            if payload.get('wallpaper_id'):
+                # Resolve the asset before any OS write or config persistence.
+                personalization.wallpaper_asset(payload['wallpaper_id'])
+                actions.append({'id': 'wallpaper', 'value': payload['wallpaper_id']})
+        config = self.environment.update(changes)
+        run = self.apply(actions)['run'] if actions else None
+        if run and run['status'] != 'verified':
+            return {'config': config, 'runtime': self.runtimes()['layout_runtime'], 'run': run,
+                    'message': 'O Windows não confirmou todas as alterações. Confira o histórico antes de iniciar o ambiente.'}
+        runtime = self.layout.start('environment', hide_native_taskbar=hide) if command == 'start' else self.runtimes()['layout_runtime']
+        return {'config': config, 'runtime': runtime, 'run': run}
 
     def gpu(self, refresh=False):
         with self._gpu_lock:

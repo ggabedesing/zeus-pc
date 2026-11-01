@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-from zeus_pc import server, windows_preferences as prefs
+from zeus_pc import server, windows_preferences as prefs, environment
 from zeus_pc.app_logging import StructuredLog
 from zeus_pc.focus import FocusService
 from zeus_pc.persistence import ZeusDatabase
@@ -31,6 +31,8 @@ class StudioHttpTests(unittest.TestCase):
         engine = TransactionEngine(db, build_default_registry())
         focus = FocusService(db, engine, lambda: {'supported': True})
         studio = Studio(focus)
+        studio.environment = environment.EnvironmentStore(root / 'environment')
+        studio.app_catalog = environment.ApplicationCatalog([root / 'Programs'])
         studio.state = lambda: {'supported': True, 'jobs': []}
         replacements = [('DB', db), ('TRANSACTIONS', engine), ('_FOCUS', focus), ('_STUDIO', studio),
                         ('APP_LOG', StructuredLog(root / 'test.jsonl'))]
@@ -80,6 +82,33 @@ class StudioHttpTests(unittest.TestCase):
 
     def test_wallpaper_import_rejects_program_data(self):
         status, _ = self.request('/api/studio/wallpapers', {'filename': 'fake.png', 'data': 'TVpmb28='})
+        self.assertEqual(status, 400)
+
+    def test_environment_save_is_local_and_invalid_batch_preserves_config(self):
+        status, saved = self.request('/api/studio/environment', {'command': 'save', 'config': {'theme': 'light', 'notes': 'local'}})
+        self.assertEqual(status, 200)
+        self.assertEqual(saved['config']['theme'], 'light')
+        status, _ = self.request('/api/studio/environment', {'command': 'save', 'config': {'theme': 'aurora', 'motion': 'yes'}})
+        self.assertEqual(status, 400)
+        self.assertEqual(server.studio_service().environment.read()['theme'], 'light')
+        self.assertEqual(self.store, {})
+
+    def test_environment_start_and_stop_use_runtime_without_changing_system_by_default(self):
+        studio = server.studio_service()
+        with patch.object(studio.layout, 'start', return_value={'running': True}) as start, patch.object(studio.layout, 'stop', return_value={'running': False}) as stop:
+            status, result = self.request('/api/studio/environment', {'command': 'start', 'config': {'theme': 'aurora'}})
+            self.assertEqual(status, 200)
+            start.assert_called_once_with('environment', hide_native_taskbar=False)
+            self.assertTrue(result['runtime']['running'])
+            status, _ = self.request('/api/studio/environment', {'command': 'stop'})
+            self.assertEqual(status, 200)
+            stop.assert_called_once()
+        self.assertEqual(self.store, {})
+
+    def test_environment_rejects_foreign_origin_and_invalid_pinned_app(self):
+        status, _ = self.request('/api/studio/environment', {'command': 'start'}, origin='https://foreign.example')
+        self.assertEqual(status, 403)
+        status, _ = self.request('/api/studio/environment', {'command': 'save', 'config': {'pinned': ['f' * 64]}})
         self.assertEqual(status, 400)
 
     def test_vendor_telemetry_is_attached_to_matching_gpu(self):

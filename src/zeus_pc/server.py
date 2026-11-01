@@ -283,6 +283,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({'jobs': studio.jobs.list()})
                 if path == '/api/studio/runtimes':
                     return self.send_json(studio.runtimes())
+                if path == '/api/studio/environment':
+                    return self.send_json(studio.environment_state())
                 if path.startswith('/api/studio/wallpapers/'):
                     from .personalization import wallpaper_asset
                     asset = wallpaper_asset(path.rsplit('/', 1)[1])
@@ -515,6 +517,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = self.read_json()
 
+            if path == '/api/studio/environment':
+                return self.send_json(studio_service().environment_command(payload))
             if path == '/api/studio/apply':
                 return self.send_json(studio_service().apply(payload.get('items')))
             if path == '/api/studio/jobs':

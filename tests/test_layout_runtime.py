@@ -124,6 +124,14 @@ class LayoutRuntimeTests(unittest.TestCase):
                 self.runtime.start(name, hide)
         self.assertEqual(self.spawned, [])
 
+    def test_environment_uses_same_owned_worker_and_exposes_no_private_paths(self):
+        first = self.runtime.start('environment')
+        self.assertTrue(first['running'])
+        self.assertEqual(first['layout'], 'environment')
+        self.assertIn('environment', self.spawned[0][0])
+        self.assertNotIn('environment_directory', first)
+        self.assertFalse(first['hide_native_taskbar'])
+
     def test_second_runtime_instance_observes_same_worker_and_switch_restores_taskbar(self):
         self.runtime.start('dock', True)
         layout._hide_bars(self.directory, self.state())
