@@ -301,7 +301,7 @@ def build_default_registry() -> ActionRegistry:
         )
     )
     registry.register(ActionDefinition(
-        action_id='SET_UI_ANIMATIONS', resource_key='UI_ANIMATIONS',
+        action_id='SET_UI_ANIMATIONS', resource_key='WINDOWS_PERSONALIZATION',
         required_privilege='USER', reversible=True,
         validate_args=_validate_animations, capture_before=_capture_animations,
         verify=_verify_animations, rollback_preview=_animations_inverse,
@@ -318,6 +318,10 @@ def build_default_registry() -> ActionRegistry:
         arg_schema={'type': 'object', 'properties': {'name': {'type': 'string'}, 'enabled': {'type': 'boolean'}},
                     'required': ['name', 'enabled'], 'additionalProperties': False},
     ))
+    from . import personalization, windows_preferences, lock_screen
+    personalization.register_actions(registry)
+    windows_preferences.register_actions(registry)
+    lock_screen.register_actions(registry)
     return registry
 
 

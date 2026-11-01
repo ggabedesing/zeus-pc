@@ -20,6 +20,17 @@ def build_report(snapshot: dict, goal: str) -> dict:
     actions, notices = [], []
     supported = snapshot.get('supported') is True
     if supported:
+        if goal == 'gaming':
+            measured = snapshot.get('preferences', {})
+            for id, current, desired, title, description in (
+                ('game_mode', False, True, 'Ativar Modo de Jogo', 'Salvar a preferência de Modo de Jogo do Windows.'),
+                ('background_capture', True, False, 'Desativar replay em segundo plano', 'Desligar a preferência de captura histórica quando você dispensa replay.'),
+            ):
+                value = measured.get(id, {})
+                if value.get('available') and value.get('value') is current:
+                    actions.append({'id': id, 'action_id': 'SET_WINDOWS_PREFERENCE',
+                        'args': {'id': id, 'value': desired}, 'title': title, 'description': description,
+                        'tradeoff': 'Preferência reversível. O efeito depende do jogo e da versão do Windows.'})
         if snapshot.get('temp_bytes', 0) > 0:
             actions.append({
                 'id': 'cleanup', 'action_id': 'CLEAN_USER_TEMP', 'args': {},
@@ -72,7 +83,7 @@ def build_report(snapshot: dict, goal: str) -> dict:
 class FocusService:
     def __init__(self, database, transactions, collector=quick_snapshot):
         self.db, self.transactions, self.collector = database, transactions, collector
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.active_run = None
 
     def analyze(self, goal):
@@ -145,12 +156,18 @@ class FocusService:
         runs = [r for r in self.history() if r['id'] != run['id']]
         self.db.set_setting('focus_runs', [run, *runs][:30])
 
-    def apply(self, report_id, action_ids):
+    def apply_custom(self, actions, goal='personalization'):
+        with self.lock:
+            report = {'id': str(uuid.uuid4()), 'created_at': time.time(), 'goal': goal,
+                      'snapshot': {}, 'actions': actions}
+            return self.apply(report['id'], [a['id'] for a in actions], custom_report=report)
+
+    def apply(self, report_id, action_ids, *, custom_report=None):
         with self.lock:
             previous = next((r for r in self.history() if r['id'] == report_id), None)
             if previous:
                 return previous  # Lost HTTP response must never replay a mutation.
-            report = self.db.get_setting('focus_report')
+            report = custom_report or self.db.get_setting('focus_report')
             if not report or report['id'] != report_id or time.time() - report['created_at'] > 300:
                 raise ValueError('A análise expirou. Analise novamente antes de aplicar.')
             allowed = {a['id']: a for a in report['actions']}
@@ -181,7 +198,10 @@ class FocusService:
                     self._save(run)
                     self.transactions.consume_consent(prepared.transaction_id, prepared.consent_token)
                     result = self.transactions.execute(prepared.transaction_id)
-                    item.update(ok=result['ok'], message=result['message'], state=result['state'])
+                    message = (result['transaction'].get('apply') or {}).get('message') or result['message']
+                    if result['ok'] and action.get('restart'):
+                        message += ' Algumas superfícies só atualizam após sair e entrar no Windows.'
+                    item.update(ok=result['ok'], message=message, state=result['state'])
                 except Exception as exc:
                     item.update(message=str(exc), state='FAILED')
                 self._save(run)

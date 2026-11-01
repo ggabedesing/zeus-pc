@@ -12,6 +12,7 @@ from .actions import list_power_plans
 from .observer import NativeWindowsSampler, _MEMORYSTATUSEX
 from .cleanup import preview_temp, temp_root
 from .startup import list_startup
+from .windows_preferences import states as preference_states
 
 SAMPLER = NativeWindowsSampler()
 
@@ -57,10 +58,11 @@ def quick_snapshot() -> dict:
         'disk_free_gb': None, 'disk_total_gb': None, 'disk_free_pct': None,
         'ac_connected': read_ac(), 'animations_enabled': None, 'power_plans': [],
         'captured_at': time.time(), 'read_errors': [], 'startup': [],
-        'temp_bytes': 0, 'temp_count': 0, '_temp_manifest': [],
+        'temp_bytes': 0, 'temp_count': 0, '_temp_manifest': [], 'preferences': {},
     }
     if not snapshot['supported']:
         return snapshot
+    snapshot['preferences'] = preference_states()
     memory = _MEMORYSTATUSEX()
     memory.dwLength = ctypes.sizeof(memory)
     if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):

@@ -4,7 +4,8 @@ Fluxo do main():
 
 1. Garante o diretório de dados (LOCALAPPDATA no EXE) e manda stdout/stderr
    para data/zeus-launcher.log quando não há console (janela PyInstaller).
-2. Porta ocupada por outro Zeus -> só abre o navegador (instância única).
+2. Porta ocupada pelo mesmo build do Zeus -> só abre o navegador.
+   Uma edição anterior permanece aberta; a nova usa outra porta local.
    Porta ocupada por outro programa -> diálogo de erro e sai com 1.
 3. Caso contrário: cria o servidor (create_server), serve em um thread,
    espera /api/status responder, abre o navegador e mostra a janela de
@@ -65,6 +66,28 @@ def wait_until_serving(url: str, timeout: float = 20.0) -> bool:
             return True
         time.sleep(0.25)
     return False
+
+
+def instance_build(url):
+    try:
+        with _OPENER.open(f'{url}/api/status', timeout=.6) as response:
+            return json.loads(response.read().decode('utf-8')).get('build')
+    except Exception:
+        return None
+
+
+def select_instance_port(preferred):
+    for port in range(preferred, min(preferred + 16, 65536)):
+        if not port_in_use(server.HOST, port):
+            return port, False
+        url = server_url(port)
+        if is_zeus_running(url):
+            if instance_build(url) == server.BUILD:
+                return port, True
+            continue  # Leave an older preview/application running untouched.
+        if port == preferred:
+            raise OSError(f'A porta {port} está em uso por outro programa.')
+    raise OSError('Não foi encontrada uma porta local disponível para o Zeus.')
 
 
 def _log(line: str) -> None:
@@ -151,18 +174,18 @@ def main() -> int:
         data.mkdir(parents=True, exist_ok=True)
         _redirect_stdio(data / LAUNCHER_LOG)
 
-        port = server.PORT
-        url = server_url(port)
-        if port_in_use(server.HOST, port):
-            if is_zeus_running(url):
-                _log(f"ja em execucao em {url}; abrindo o navegador")
-                webbrowser.open(url)
-                return 0
-            _fatal(
-                f"A porta {port} esta em uso por outro programa.\n"
-                "Feche o programa ou defina ZEUS_PORT com outra porta."
-            )
+        try:
+            port, reuse = select_instance_port(server.PORT)
+        except OSError as exc:
+            _fatal(str(exc))
             return 1
+        url = server_url(port)
+        if reuse:
+            _log(f'já em execução em {url}; abrindo o navegador')
+            webbrowser.open(url)
+            return 0
+        server.PORT = port
+        os.environ['ZEUS_PORT'] = str(port)
 
         httpd = server.create_server()
         threading.Thread(

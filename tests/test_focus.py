@@ -25,6 +25,19 @@ def machine(**changes):
 
 
 class FocusPlanTests(unittest.TestCase):
+    def test_gaming_plan_uses_measured_windows_preferences(self):
+        report = build_report(machine(preferences={
+            'game_mode': {'available': True, 'value': False},
+            'background_capture': {'available': True, 'value': True},
+        }), 'gaming')
+        actions = {a['id']: a for a in report['actions']}
+        self.assertEqual(actions['game_mode']['args'], {'id': 'game_mode', 'value': True})
+        self.assertEqual(actions['background_capture']['args'], {'id': 'background_capture', 'value': False})
+
+    def test_unknown_preferences_are_not_guessed_in_gaming_plan(self):
+        report = build_report(machine(preferences={'game_mode': {'available': True, 'value': None}}), 'gaming')
+        self.assertFalse(any(a['id'] == 'game_mode' for a in report['actions']))
+
     def test_gaming_on_ac_offers_existing_performance_plan(self):
         report = build_report(machine(), 'gaming')
         energy = next(a for a in report['actions'] if a['id'] == 'energy')
