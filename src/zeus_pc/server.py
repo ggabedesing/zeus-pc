@@ -29,6 +29,7 @@ from .persistence import ZeusDatabase
 from .process_observer import PROCESS_OBSERVER
 from .probes import collect_all
 from .transaction import TransactionEngine
+from .focus import FocusService
 
 # Caminhos frozen-aware: no EXE, web/ vem do bundle e data/ fica em
 # %LOCALAPPDATA%\ZeusPC\data (ver app_paths.py).
@@ -39,6 +40,27 @@ APP_LOG = StructuredLog(DATA / "zeus-app.jsonl", max_entries=2000)
 TRANSACTIONS = TransactionEngine(DB)
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("ZEUS_PORT", "8000"))
+
+
+def focus_service():
+    # Keep a single lock for scan/apply/undo while preserving test database injection.
+    global _FOCUS
+    if _FOCUS is None or _FOCUS.db is not DB or _FOCUS.transactions is not TRANSACTIONS:
+        _FOCUS = FocusService(DB, TRANSACTIONS)
+    return _FOCUS
+
+
+_FOCUS = None
+_STUDIO = None
+
+
+def studio_service():
+    global _STUDIO
+    focus = focus_service()
+    if _STUDIO is None or _STUDIO.focus is not focus:
+        from .studio import Studio
+        _STUDIO = Studio(focus)
+    return _STUDIO
 
 
 def dumps(payload) -> bytes:
@@ -162,7 +184,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_json(self):
         length = int(self.headers.get("Content-Length") or 0)
-        if length > 65536:
+        maximum = 28 * 1024 * 1024 if urlparse(self.path).path == '/api/studio/wallpapers' else 65536
+        if length < 0 or length > maximum:
             raise ValueError("Payload muito grande.")
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8") or "{}")
@@ -243,6 +266,38 @@ class Handler(BaseHTTPRequestHandler):
             })
         if path == "/api/config":
             return self.send_json({"config": config.to_dict()})
+        if path == '/api/focus/state':
+            service = focus_service()
+            return self.send_json({
+                'report': service.public_report(DB.get_setting('focus_report')),
+                'runs': service.history(),
+            })
+        if path.startswith('/api/studio/'):
+            try:
+                studio = studio_service()
+                if path == '/api/studio/catalog':
+                    return self.send_json(studio.catalog())
+                if path == '/api/studio/state':
+                    return self.send_json(studio.state())
+                if path == '/api/studio/jobs':
+                    return self.send_json({'jobs': studio.jobs.list()})
+                if path == '/api/studio/runtimes':
+                    return self.send_json(studio.runtimes())
+                if path == '/api/studio/environment':
+                    return self.send_json(studio.environment_state())
+                if path.startswith('/api/studio/wallpapers/'):
+                    from .personalization import wallpaper_asset
+                    asset = wallpaper_asset(path.rsplit('/', 1)[1])
+                    content = asset.read_bytes()
+                    self.send_response(200)
+                    self.send_header('Content-Type', mimetypes.guess_type(str(asset))[0] or 'application/octet-stream')
+                    self.send_header('Content-Length', str(len(content)))
+                    self.send_header('X-Content-Type-Options', 'nosniff')
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+            except Exception as exc:
+                return self.send_json({'ok': False, 'message': str(exc)}, 400)
         if path == "/api/scan":
             profile = query.get("profile", [config.selected_profile])[0]
             return self.send_json(run_scan(profile))
@@ -461,6 +516,66 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = self.read_json()
+
+            if path == '/api/studio/environment':
+                return self.send_json(studio_service().environment_command(payload))
+            if path == '/api/studio/apply':
+                return self.send_json(studio_service().apply(payload.get('items')))
+            if path == '/api/studio/jobs':
+                return self.send_json({'job': studio_service().jobs.start(str(payload.get('id') or ''))})
+            if path == '/api/studio/applications':
+                from .windows_preferences import register_application
+                application = register_application(payload.get('path'))
+                studio = studio_service()
+                studio._gpu_at = 0
+                return self.send_json({'application': application, 'state': studio.state()})
+            if path == '/api/studio/wallpapers':
+                import base64
+                from .personalization import import_wallpaper
+                data = base64.b64decode(str(payload.get('data') or ''), validate=True)
+                return self.send_json({'wallpaper': import_wallpaper(data)})
+            if path in {'/api/studio/desktop', '/api/studio/layout'}:
+                studio = studio_service()
+                runtime = studio.desktop if path.endswith('/desktop') else studio.layout
+                command = payload.get('command')
+                if command == 'stop':
+                    return self.send_json({'runtime': runtime.stop()})
+                if command != 'start':
+                    raise ValueError('Comando de aparência inválido.')
+                if path.endswith('/desktop'):
+                    result = runtime.start(str(payload.get('scene') or ''))
+                else:
+                    hide = payload.get('hide_native_taskbar', False)
+                    if not isinstance(hide, bool):
+                        raise ValueError('A opção de barra deve ser true ou false.')
+                    result = runtime.start(str(payload.get('layout') or ''), hide_native_taskbar=hide)
+                return self.send_json({'runtime': result})
+
+            if path == '/api/focus/analyze':
+                service = focus_service()
+                return self.send_json({'report': service.public_report(service.analyze(str(payload.get('goal') or 'daily')))})
+
+            if path == '/api/focus/apply':
+                result = focus_service().apply(str(payload.get('report_id') or ''), payload.get('action_ids'))
+                APP_LOG.write('focus_applied', report_id=result['id'], state=result['status'])
+                return self.send_json({'run': result})
+
+            if path == '/api/focus/undo':
+                result = focus_service().undo(str(payload.get('report_id') or ''))
+                APP_LOG.write('focus_undo', report_id=result['id'], undone=result['undone'])
+                return self.send_json({'run': result})
+
+            if path == '/api/focus/open':
+                # Closed, user-initiated destinations. Never accepts a path or command.
+                import subprocess
+                target = payload.get('target')
+                if os.name != 'nt' or target not in {'storage', 'taskmgr', 'startup'}:
+                    raise ValueError('Destino indisponível.')
+                if target == 'taskmgr':
+                    subprocess.Popen([str(Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32' / 'Taskmgr.exe')])
+                else:
+                    os.startfile({'storage': 'ms-settings:storagesense', 'startup': 'ms-settings:startupapps'}[target])
+                return self.send_json({'ok': True})
 
             if path == "/api/config":
                 config = save_config(DB, payload)
@@ -731,6 +846,8 @@ def create_server() -> ThreadingHTTPServer:
 def finalize_server(server: ThreadingHTTPServer) -> None:
     """Para observadores, registra o fim e libera o socket."""
     OBSERVER_RUNNER.stop()
+    if _STUDIO is not None:
+        _STUDIO.close()
     APP_LOG.write("server_stopped")
     server.server_close()
 

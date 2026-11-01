@@ -1,2 +1,2 @@
 __version__ = "0.1.0"
-BUILD = "revolution-foundation"
+BUILD = "desktop-environment-native-2026-11-01"

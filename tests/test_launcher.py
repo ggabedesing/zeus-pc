@@ -28,7 +28,7 @@ class _StubHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 (assinatura do http.server)
         if self.path == "/api/status":
-            body = json.dumps({"version": "0.0.0-test"}).encode("utf-8")
+            body = json.dumps({"version": "0.0.0-test", "build": server.BUILD}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -67,6 +67,18 @@ def _stop(httpd: ThreadingHTTPServer, thread: threading.Thread) -> None:
 
 
 class PortCheckTests(unittest.TestCase):
+    def test_older_preview_does_not_replace_the_new_application(self):
+        with patch.object(launcher, 'port_in_use', side_effect=lambda host, port: port == 8000), \
+             patch.object(launcher, 'is_zeus_running', return_value=True), \
+             patch.object(launcher, 'instance_build', return_value='old-preview', create=True):
+            self.assertEqual(launcher.select_instance_port(8000), (8001, False))
+
+    def test_matching_build_is_reused_without_starting_another_process(self):
+        with patch.object(launcher, 'port_in_use', return_value=True), \
+             patch.object(launcher, 'is_zeus_running', return_value=True), \
+             patch.object(launcher, 'instance_build', return_value=server.BUILD, create=True):
+            self.assertEqual(launcher.select_instance_port(8000), (8000, True))
+
     def test_port_in_use_true_when_something_listens(self) -> None:
         httpd, thread = _serve(_Plain404Handler)
         try:

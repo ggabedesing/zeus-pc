@@ -15,7 +15,7 @@ class AppConfig:
     schema_version: int = CONFIG_SCHEMA_VERSION
     selected_profile: str = "GENERAL"
     history_limit: int = 20
-    observer_enabled: bool = True
+    observer_enabled: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -47,9 +47,9 @@ def normalize_config(payload: Any) -> AppConfig:
     if version != CONFIG_SCHEMA_VERSION:
         return AppConfig()
 
-    observer_enabled = payload.get("observer_enabled", True)
+    observer_enabled = payload.get("observer_enabled", False)
     if not isinstance(observer_enabled, bool):
-        observer_enabled = True
+        observer_enabled = False
 
     return AppConfig(
         schema_version=CONFIG_SCHEMA_VERSION,
